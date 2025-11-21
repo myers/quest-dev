@@ -15,9 +15,10 @@ npm install -g @myerscarpenter/quest-dev
   - Linux: `sudo apt install adb`
   - Windows: [Download Platform Tools](https://developer.android.com/tools/releases/platform-tools)
 
-- **Quest Device** - Connected via USB with Developer Mode and USB Debugging enabled
+- **Quest Device** - Connected via USB with [Developer Mode and USB Debugging enabled](https://developers.meta.com/horizon/documentation/native/android/mobile-device-setup/)
 
 - **cdp-cli** (optional) - For smart tab reuse in the `open` command
+
   ```bash
   npm install -g @myerscarpenter/cdp-cli
   ```
@@ -45,6 +46,7 @@ quest-dev open http://localhost:9004/my-xr-app/
 ```
 
 This command:
+
 1. Sets up ADB reverse port forwarding (Quest → Host) so the Quest can reach your dev server
 2. Sets up ADB forward port forwarding (Host → Quest) for CDP communication
 3. If Quest Browser is already running with the URL, reloads the tab
