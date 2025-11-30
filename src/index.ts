@@ -39,7 +39,7 @@ const cli = yargs(hideBin(process.argv))
   })
   .help()
   .alias('help', 'h')
-  .epilog('Requires ADB to be installed and Quest connected via USB with debugging enabled.');
+  .epilog('Requires ADB and Quest connected via USB. Sets up CDP on port 9223 for cdp-cli.');
 
 // Screenshot command
 cli.command(
@@ -60,7 +60,7 @@ cli.command(
 // Open command
 cli.command(
   'open <url>',
-  'Open URL in Quest browser with ADB port forwarding',
+  'Open URL in Quest browser (sets up dev server + CDP debugging port forwarding)',
   (yargs) => {
     return yargs.positional('url', {
       describe: 'URL to open (e.g., http://localhost:9004/myapp/)',
