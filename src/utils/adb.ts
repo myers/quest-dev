@@ -130,21 +130,32 @@ export async function ensurePortForwarding(port: number): Promise<void> {
     }
 
     // Check forward forwarding (Host -> Quest for CDP)
-    const cdpPortListening = await isPortListening(CDP_PORT);
+    // First check if ADB already has this forwarding set up
+    const forwardList = await execCommand('adb', ['forward', '--list']);
+    const forwardExists = forwardList.includes(`tcp:${CDP_PORT}`) && forwardList.includes('chrome_devtools_remote');
 
-    if (cdpPortListening) {
-      console.log(`CDP port ${CDP_PORT} already listening (forwarding assumed active)`);
+    if (forwardExists) {
+      console.log(`CDP port ${CDP_PORT} forwarding already set up`);
     } else {
+      // Check if something else is using the port
+      const cdpPortListening = await isPortListening(CDP_PORT);
+      if (cdpPortListening) {
+        console.error(`Error: Port ${CDP_PORT} is already in use by another process`);
+        console.error('');
+        console.error('CDP port forwarding requires port 9223 to be free.');
+        console.error('Please stop the process using this port and try again.');
+        console.error('');
+        console.error('To find what is using the port:');
+        console.error(`  lsof -i :${CDP_PORT}`);
+        console.error('');
+        process.exit(1);
+      }
+
       try {
         await execCommand('adb', ['forward', `tcp:${CDP_PORT}`, 'localabstract:chrome_devtools_remote']);
         console.log(`ADB forward port forwarding set up: Host:${CDP_PORT} -> Quest:chrome_devtools_remote (CDP)`);
       } catch (forwardError) {
-        const errorMsg = (forwardError as Error).message;
-        if (errorMsg.includes('Address already in use')) {
-          console.log(`CDP port ${CDP_PORT} is now active (another process set it up)`);
-        } else {
-          throw forwardError;
-        }
+        throw forwardError;
       }
     }
   } catch (error) {
