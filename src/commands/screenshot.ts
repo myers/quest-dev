@@ -4,8 +4,8 @@
  */
 
 import { resolve } from 'path';
-import { checkADBPath, checkADBDevices } from '../utils/adb.js';
-import { execCommand } from '../utils/exec.js';
+import { checkADBPath, checkADBDevices, checkUSBFileTransfer, checkQuestAwake } from '../utils/adb.js';
+import { execCommand, execCommandFull } from '../utils/exec.js';
 
 /**
  * Trigger Quest screenshot service
@@ -38,13 +38,10 @@ async function getMostRecentScreenshot(): Promise<string | null> {
     const files = output.split('\n').filter(line => line.trim() && line.endsWith('.jpg'));
 
     if (files.length === 0) {
-      console.error('No screenshots found in /sdcard/Oculus/Screenshots/');
       return null;
     }
 
-    const mostRecent = files[0].trim();
-    console.log(`Found most recent screenshot: ${mostRecent}`);
-    return mostRecent;
+    return files[0].trim();
   } catch (error) {
     console.error('Failed to list screenshots:', (error as Error).message);
     return null;
@@ -67,6 +64,19 @@ async function pullScreenshot(filename: string, outputPath: string): Promise<boo
 }
 
 /**
+ * Delete screenshot from Quest after pulling
+ */
+async function deleteRemoteScreenshot(filename: string): Promise<void> {
+  const remotePath = `/sdcard/Oculus/Screenshots/${filename}`;
+  const result = await execCommandFull('adb', ['shell', 'rm', remotePath]);
+  if (result.code !== 0) {
+    console.warn(`Warning: Failed to delete screenshot from Quest: ${filename}`);
+  } else {
+    console.log(`Deleted screenshot from Quest: ${filename}`);
+  }
+}
+
+/**
  * Main screenshot command handler
  */
 export async function screenshotCommand(outputPath: string): Promise<void> {
@@ -77,19 +87,42 @@ export async function screenshotCommand(outputPath: string): Promise<void> {
   // Check prerequisites
   checkADBPath();
   await checkADBDevices();
+  await checkUSBFileTransfer();
+  await checkQuestAwake();
+
+  // Get existing most recent screenshot (to detect if a new one is created)
+  const existingScreenshot = await getMostRecentScreenshot();
 
   // Trigger screenshot
   if (!await triggerScreenshot()) {
     process.exit(1);
   }
 
-  // Wait for screenshot to save
+  // Wait for screenshot to save and verify a new one was created
   console.log('Waiting for screenshot to save...');
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  let filename: string | null = null;
+  const maxAttempts = 10;
 
-  // Get most recent screenshot
-  const filename = await getMostRecentScreenshot();
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const newScreenshot = await getMostRecentScreenshot();
+
+    if (newScreenshot && newScreenshot !== existingScreenshot) {
+      filename = newScreenshot;
+      console.log(`New screenshot created: ${filename}`);
+      break;
+    }
+  }
+
   if (!filename) {
+    console.error('Error: Screenshot was not created');
+    console.error('');
+    console.error('The screenshot service was triggered but no new screenshot appeared.');
+    console.error('This can happen if:');
+    console.error('- The Quest is asleep or the screen is off');
+    console.error('- The Quest is showing a system dialog');
+    console.error('- There is insufficient storage space');
+    console.error('');
     process.exit(1);
   }
 
@@ -97,6 +130,9 @@ export async function screenshotCommand(outputPath: string): Promise<void> {
   if (!await pullScreenshot(filename, resolvedPath)) {
     process.exit(1);
   }
+
+  // Delete from Quest after successful pull
+  await deleteRemoteScreenshot(filename);
 
   console.log('\nDone!\n');
 }

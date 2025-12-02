@@ -151,12 +151,8 @@ export async function ensurePortForwarding(port: number): Promise<void> {
         process.exit(1);
       }
 
-      try {
-        await execCommand('adb', ['forward', `tcp:${CDP_PORT}`, 'localabstract:chrome_devtools_remote']);
-        console.log(`ADB forward port forwarding set up: Host:${CDP_PORT} -> Quest:chrome_devtools_remote (CDP)`);
-      } catch (forwardError) {
-        throw forwardError;
-      }
+      await execCommand('adb', ['forward', `tcp:${CDP_PORT}`, 'localabstract:chrome_devtools_remote']);
+      console.log(`ADB forward port forwarding set up: Host:${CDP_PORT} -> Quest:chrome_devtools_remote (CDP)`);
     }
   } catch (error) {
     console.error('Failed to set up port forwarding:', (error as Error).message);
@@ -205,4 +201,41 @@ export async function launchBrowser(url: string): Promise<boolean> {
  */
 export function getCDPPort(): number {
   return CDP_PORT;
+}
+
+/**
+ * Check if USB file transfer is authorized on Quest
+ * After reboot, user must click notification to allow file access
+ */
+export async function checkUSBFileTransfer(): Promise<void> {
+  const result = await execCommandFull('adb', ['shell', 'ls', '/sdcard/']);
+
+  if (result.code !== 0 ||
+      result.stdout.includes('Permission denied') ||
+      result.stderr.includes('Permission denied')) {
+    console.error('Error: USB file transfer not authorized on Quest');
+    console.error('');
+    console.error('After rebooting your Quest, you need to authorize USB file transfers:');
+    console.error('1. Put on your Quest headset');
+    console.error('2. Look for the "Allow access to data" notification');
+    console.error('3. Click "Allow" to authorize file transfers');
+    console.error('');
+    process.exit(1);
+  }
+}
+
+/**
+ * Check if Quest display is awake
+ * Screenshots cannot be taken when the display is off
+ */
+export async function checkQuestAwake(): Promise<void> {
+  const result = await execCommandFull('adb', ['shell', 'dumpsys', 'power']);
+
+  if (result.stdout.includes('mWakefulness=Asleep')) {
+    console.error('Error: Quest display is off');
+    console.error('');
+    console.error('Put on the Quest headset or press the power button to wake it.');
+    console.error('');
+    process.exit(1);
+  }
 }
