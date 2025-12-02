@@ -1,6 +1,6 @@
 {
   "name": "@myerscarpenter/quest-dev",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "CLI for Meta Quest Browser development - screenshot and URL opening via ADB and cdp-cli",
   "type": "module",
   "bin": {
