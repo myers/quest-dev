@@ -60,10 +60,10 @@ cli.command(
 // Open command
 cli.command(
   'open <url>',
-  'Open URL in Quest browser (sets up dev server + CDP debugging port forwarding)',
+  'Open URL in Quest browser (sets up CDP debugging port forwarding)',
   (yargs) => {
     return yargs.positional('url', {
-      describe: 'URL to open (e.g., http://localhost:9004/myapp/)',
+      describe: 'URL to open (localhost URLs get reverse forwarding for dev server access)',
       type: 'string',
       demandOption: true
     });

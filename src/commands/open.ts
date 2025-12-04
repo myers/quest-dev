@@ -7,6 +7,7 @@ import {
   checkADBPath,
   checkADBDevices,
   ensurePortForwarding,
+  ensureCDPForwarding,
   isBrowserRunning,
   launchBrowser,
   getCDPPort
@@ -93,18 +94,27 @@ async function tryNavigateExistingTab(targetUrl: string): Promise<boolean> {
  * Main open command handler
  */
 export async function openCommand(url: string): Promise<void> {
-  // Parse port from URL
-  let port: number;
+  // Parse URL to determine if we need reverse port forwarding
+  let parsedUrl: URL;
   try {
-    const parsedUrl = new URL(url);
-    port = parseInt(parsedUrl.port, 10);
-    if (!port || isNaN(port)) {
-      console.error('Error: Could not parse port from URL:', url);
-      process.exit(1);
-    }
+    parsedUrl = new URL(url);
   } catch (error) {
     console.error('Error: Invalid URL:', url);
     process.exit(1);
+  }
+
+  // Determine if this is a localhost URL that needs reverse forwarding
+  const isLocalhost = parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1';
+  let port: number | null = null;
+
+  if (isLocalhost) {
+    // For localhost, we need a port for reverse forwarding
+    if (parsedUrl.port) {
+      port = parseInt(parsedUrl.port, 10);
+    } else {
+      // Use default port based on protocol
+      port = parsedUrl.protocol === 'https:' ? 443 : 80;
+    }
   }
 
   console.log(`\nOpening ${url} on Quest...\n`);
@@ -113,8 +123,14 @@ export async function openCommand(url: string): Promise<void> {
   checkADBPath();
   await checkADBDevices();
 
-  // Set up port forwarding (idempotent)
-  await ensurePortForwarding(port);
+  // Set up port forwarding
+  if (port !== null) {
+    // Localhost URL: need reverse forwarding so Quest can reach the dev server
+    await ensurePortForwarding(port);
+  } else {
+    // External URL: only need CDP forwarding to control the browser
+    await ensureCDPForwarding();
+  }
 
   // Check if browser is running
   const browserRunning = await isBrowserRunning();

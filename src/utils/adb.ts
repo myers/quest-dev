@@ -204,6 +204,41 @@ export function getCDPPort(): number {
 }
 
 /**
+ * Set up only CDP forwarding (for external URLs that don't need reverse forwarding)
+ */
+export async function ensureCDPForwarding(): Promise<void> {
+  try {
+    // Check forward forwarding (Host -> Quest for CDP)
+    const forwardList = await execCommand('adb', ['forward', '--list']);
+    const forwardExists = forwardList.includes(`tcp:${CDP_PORT}`) && forwardList.includes('chrome_devtools_remote');
+
+    if (forwardExists) {
+      console.log(`CDP port ${CDP_PORT} forwarding already set up`);
+    } else {
+      // Check if something else is using the port
+      const cdpPortListening = await isPortListening(CDP_PORT);
+      if (cdpPortListening) {
+        console.error(`Error: Port ${CDP_PORT} is already in use by another process`);
+        console.error('');
+        console.error('CDP port forwarding requires port 9223 to be free.');
+        console.error('Please stop the process using this port and try again.');
+        console.error('');
+        console.error('To find what is using the port:');
+        console.error(`  lsof -i :${CDP_PORT}`);
+        console.error('');
+        process.exit(1);
+      }
+
+      await execCommand('adb', ['forward', `tcp:${CDP_PORT}`, 'localabstract:chrome_devtools_remote']);
+      console.log(`ADB forward port forwarding set up: Host:${CDP_PORT} -> Quest:chrome_devtools_remote (CDP)`);
+    }
+  } catch (error) {
+    console.error('Failed to set up CDP forwarding:', (error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Check if USB file transfer is authorized on Quest
  * After reboot, user must click notification to allow file access
  */
