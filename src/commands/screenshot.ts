@@ -49,6 +49,36 @@ async function getMostRecentScreenshot(): Promise<string | null> {
 }
 
 /**
+ * Check if JPEG file is complete by looking for EOI marker (FF D9) at end
+ */
+async function isJpegComplete(filename: string): Promise<boolean> {
+  try {
+    const remotePath = `/sdcard/Oculus/Screenshots/${filename}`;
+    // Use adb exec-out to get raw bytes, read last 2 bytes
+    const { spawn } = await import('child_process');
+
+    return new Promise((resolve) => {
+      const proc = spawn('adb', ['exec-out', 'tail', '-c', '2', remotePath]);
+      const chunks: Buffer[] = [];
+
+      proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          resolve(false);
+          return;
+        }
+        const buffer = Buffer.concat(chunks);
+        // Check for JPEG EOI marker: FF D9
+        resolve(buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xd9);
+      });
+      proc.on('error', () => resolve(false));
+    });
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
  * Pull screenshot from Quest to local path
  */
 async function pullScreenshot(filename: string, outputPath: string): Promise<boolean> {
@@ -98,29 +128,34 @@ export async function screenshotCommand(outputPath: string): Promise<void> {
     process.exit(1);
   }
 
-  // Wait for screenshot to save and verify a new one was created
+  // Wait for screenshot to save and verify it's complete (has JPEG EOI marker)
   console.log('Waiting for screenshot to save...');
   let filename: string | null = null;
-  const maxAttempts = 10;
+  const maxAttempts = 20;
 
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(resolve => setTimeout(resolve, 500));
     const newScreenshot = await getMostRecentScreenshot();
 
     if (newScreenshot && newScreenshot !== existingScreenshot) {
-      filename = newScreenshot;
-      console.log(`New screenshot created: ${filename}`);
-      break;
+      // Check that the JPEG is fully written (has EOI marker)
+      const complete = await isJpegComplete(newScreenshot);
+      if (complete) {
+        filename = newScreenshot;
+        console.log(`Screenshot ready: ${filename}`);
+        break;
+      }
     }
   }
 
   if (!filename) {
-    console.error('Error: Screenshot was not created');
+    console.error('Error: Screenshot was not created or is incomplete');
     console.error('');
-    console.error('The screenshot service was triggered but no new screenshot appeared.');
+    console.error('The screenshot service was triggered but no valid screenshot appeared.');
     console.error('This can happen if:');
     console.error('- The Quest is asleep or the screen is off');
     console.error('- The Quest is showing a system dialog');
+    console.error('- The metacam service failed to capture (try rebooting Quest)');
     console.error('- There is insufficient storage space');
     console.error('');
     process.exit(1);
