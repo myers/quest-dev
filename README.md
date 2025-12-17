@@ -57,7 +57,7 @@ Port forwarding is idempotent - safe to run multiple times without issues.
 
 ## How It Works
 
-- **screenshot**: Triggers `com.oculus.metacam/.capture.CaptureService` via ADB, waits for the screenshot to save, then pulls the most recent file from `/sdcard/Oculus/Screenshots/`
+- **screenshot**: Triggers `com.oculus.metacam/.capture.CaptureService` via ADB, waits for the JPEG to be fully written (by checking for the EOI marker), pulls the file, then deletes it from the Quest
 
 - **open**: Uses ADB for port forwarding and browser launching. If `cdp-cli` is installed, it uses CDP to intelligently reuse existing tabs instead of opening new ones.
 
