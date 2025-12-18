@@ -15,6 +15,55 @@ import {
 import { execCommand, execCommandFull } from '../utils/exec.js';
 
 /**
+ * Close all tabs except the one with the target URL
+ */
+async function closeOtherTabs(targetUrl: string): Promise<void> {
+  const cdpPort = getCDPPort();
+
+  try {
+    // Get list of tabs
+    const result = await execCommandFull('cdp-cli', ['--cdp-url', `http://localhost:${cdpPort}`, 'tabs']);
+    if (result.code !== 0) {
+      console.log('Could not list tabs to close others');
+      return;
+    }
+
+    // Parse tabs
+    const lines = result.stdout.trim().split('\n').filter(line => line.trim());
+    const tabs: Array<{ id: string; url: string }> = [];
+
+    for (const line of lines) {
+      try {
+        const tab = JSON.parse(line);
+        if (tab.id && tab.url !== undefined) {
+          tabs.push(tab);
+        }
+      } catch {
+        // Skip non-JSON lines
+      }
+    }
+
+    // Normalize URLs for comparison (handle trailing slash differences)
+    const normalizeUrl = (url: string) => url.replace(/\/$/, '');
+    const normalizedTarget = normalizeUrl(targetUrl);
+
+    // Close all tabs that don't have the target URL, keeping the first match
+    let keptOne = false;
+    for (const tab of tabs) {
+      const isTargetTab = normalizeUrl(tab.url) === normalizedTarget;
+      if (isTargetTab && !keptOne) {
+        keptOne = true;
+        continue; // Keep this tab
+      }
+      console.log(`Closing tab: ${tab.url || '(blank)'}`);
+      await execCommandFull('cdp-cli', ['--cdp-url', `http://localhost:${cdpPort}`, 'close', tab.id]);
+    }
+  } catch (error) {
+    console.log('Failed to close other tabs:', (error as Error).message);
+  }
+}
+
+/**
  * Try to navigate or reload existing tab via cdp-cli
  */
 async function tryNavigateExistingTab(targetUrl: string): Promise<boolean> {
@@ -93,7 +142,7 @@ async function tryNavigateExistingTab(targetUrl: string): Promise<boolean> {
 /**
  * Main open command handler
  */
-export async function openCommand(url: string): Promise<void> {
+export async function openCommand(url: string, closeOthers: boolean = false): Promise<void> {
   // Parse URL to determine if we need reverse port forwarding
   let parsedUrl: URL;
   try {
@@ -148,6 +197,14 @@ export async function openCommand(url: string): Promise<void> {
       console.log('No existing or blank tab found, opening URL...');
       await launchBrowser(url);
     }
+  }
+
+  // Close other tabs if requested
+  if (closeOthers) {
+    // Wait for browser to stabilize after launch/navigation
+    console.log('Waiting for browser to stabilize...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await closeOtherTabs(url);
   }
 
   console.log('\nDone!\n');

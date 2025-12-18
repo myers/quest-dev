@@ -62,14 +62,20 @@ cli.command(
   'open <url>',
   'Open URL in Quest browser (sets up CDP debugging port forwarding)',
   (yargs) => {
-    return yargs.positional('url', {
-      describe: 'URL to open (localhost URLs get reverse forwarding for dev server access)',
-      type: 'string',
-      demandOption: true
-    });
+    return yargs
+      .positional('url', {
+        describe: 'URL to open (localhost URLs get reverse forwarding for dev server access)',
+        type: 'string',
+        demandOption: true
+      })
+      .option('close-others', {
+        describe: 'Close all other tabs before opening',
+        type: 'boolean',
+        default: false
+      });
   },
   async (argv) => {
-    await openCommand(argv.url as string);
+    await openCommand(argv.url as string, argv.closeOthers as boolean);
   }
 );
 
