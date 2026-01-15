@@ -14,7 +14,6 @@ const CDP_PORT = 9223; // Chrome DevTools Protocol port (Quest browser default)
 export function checkADBPath(): string {
   try {
     const adbPath = which.sync('adb');
-    console.log(`Found ADB at: ${adbPath}`);
     return adbPath;
   } catch (error) {
     console.error('Error: ADB not found in PATH');

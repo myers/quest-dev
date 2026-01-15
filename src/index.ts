@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { screenshotCommand } from './commands/screenshot.js';
 import { openCommand } from './commands/open.js';
+import { startCommand, stopCommand, statusCommand, tailCommand } from './commands/logcat.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -76,6 +77,47 @@ cli.command(
   },
   async (argv) => {
     await openCommand(argv.url as string, argv.closeOthers as boolean);
+  }
+);
+
+// Logcat command
+cli.command(
+  'logcat <action>',
+  'Capture Android logcat to files (CRITICAL: always start before testing to avoid losing crash logs)',
+  (yargs) => {
+    return yargs
+      .positional('action', {
+        describe: 'Action to perform',
+        type: 'string',
+        choices: ['start', 'stop', 'status', 'tail'],
+        demandOption: true
+      })
+      .option('filter', {
+        describe: 'Logcat filter expression (e.g., "*:W" for warnings+, "chromium:V *:S" for chromium only)',
+        type: 'string'
+      });
+  },
+  async (argv) => {
+    const action = argv.action as string;
+    const filter = argv.filter as string | undefined;
+
+    switch (action) {
+      case 'start':
+        await startCommand(filter);
+        break;
+      case 'stop':
+        await stopCommand();
+        break;
+      case 'status':
+        await statusCommand();
+        break;
+      case 'tail':
+        await tailCommand();
+        break;
+      default:
+        console.error(`Unknown action: ${action}`);
+        process.exit(1);
+    }
   }
 );
 
