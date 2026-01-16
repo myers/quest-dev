@@ -11,6 +11,9 @@ importers:
       '@myerscarpenter/cdp-cli':
         specifier: '>=2.0.0'
         version: 2.0.0
+      exiftool-vendored:
+        specifier: ^35.1.0
+        version: 35.1.0
       which:
         specifier: ^4.0.0
         version: 4.0.0
@@ -225,6 +228,9 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
+  '@photostructure/tz-lookup@11.4.0':
+    resolution: {integrity: sha512-yrFaDbQQZVJIzpCTnoghWO8Rttu22Hg7/JkfP3CM8UKniXYzD80cuv4UAsFkzP5Z6XWceWNsQTqUJHKyGNXzLg==}
+
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
@@ -357,6 +363,9 @@ packages:
   '@types/istanbul-lib-coverage@2.0.6':
     resolution: {integrity: sha512-2QF/t/auWm0lsy8XtKVPG19v3sSOQlJe/YHZgfjb/KBBHOGSV+J2q/S671rcq9uTBrLAXmZpqJiaQbMT+zNU1w==}
 
+  '@types/luxon@3.7.1':
+    resolution: {integrity: sha512-H3iskjFIAn5SlJU7OuxUmTEpebK6TKB8rxZShDslBMZJ5u9S//KM1sbdAisiSrqwLQncVjnpi2OK2J51h+4lsg==}
+
   '@types/node@24.10.1':
     resolution: {integrity: sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==}
 
@@ -425,6 +434,10 @@ packages:
 
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
+
+  batch-cluster@17.0.0:
+    resolution: {integrity: sha512-YQAwRrZv0V51mAg56Re/+zpTeUwYPXHB2v6HUod6iCQbq8txbi2kmLJHzq83fatqyh3fHC8bBcIBpAS04Xig9A==}
+    engines: {node: '>=20'}
 
   brace-expansion@2.0.2:
     resolution: {integrity: sha512-Jt0vHyM+jmUBqojB7E1NIYadt0vI0Qxjxd2TErW94wDz+E2LAm5vKMXXwg6ZZBTHPuUlDgQHKXvjGBdfcF1ZDQ==}
@@ -501,6 +514,19 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
+  exiftool-vendored.exe@13.45.0:
+    resolution: {integrity: sha512-xa+gEnZ2Q9BAzaDr35xgADql+T6L92RqK0GjzOjzDuObwhr+sBr5RdySvZ3osHac9GJypxvk4cewNnj4OnPL3Q==}
+    os: [win32]
+
+  exiftool-vendored.pl@13.45.0:
+    resolution: {integrity: sha512-uA58bMcXqdSQAqsZbHa/SMU6XKXsmoMcJSlKJjsCmLlQKEThncuAlpg8wGVNhULNXxYmRXXnYQ1756UYQY9VIA==}
+    os: ['!win32']
+    hasBin: true
+
+  exiftool-vendored@35.1.0:
+    resolution: {integrity: sha512-UYGi5LerFvZFGu1EnRLtXQFKDmR+LRJP0OjSBYpYp7Rv3Oo5UNMpBdszkt/OPIpbBQTwMY0cpoqQlXFXWhlGOg==}
+    engines: {node: '>=20.0.0'}
+
   expect-type@1.2.2:
     resolution: {integrity: sha512-JhFGDVJ7tmDJItKhYgJCGLOWjuK9vPxiXoUFLwLDc99NlmklilbiQJwoctZtt13+xMw91MCk/REan6MWHqDjyA==}
     engines: {node: '>=12.0.0'}
@@ -549,6 +575,10 @@ packages:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
     engines: {node: '>=8'}
 
+  he@1.2.0:
+    resolution: {integrity: sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==}
+    hasBin: true
+
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
 
@@ -584,6 +614,10 @@ packages:
 
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
+
+  luxon@3.7.2:
+    resolution: {integrity: sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==}
+    engines: {node: '>=12'}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -1000,6 +1034,8 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
+  '@photostructure/tz-lookup@11.4.0': {}
+
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
@@ -1084,6 +1120,8 @@ snapshots:
 
   '@types/istanbul-lib-coverage@2.0.6': {}
 
+  '@types/luxon@3.7.1': {}
+
   '@types/node@24.10.1':
     dependencies:
       undici-types: 7.16.0
@@ -1159,6 +1197,8 @@ snapshots:
   assertion-error@2.0.1: {}
 
   balanced-match@1.0.2: {}
+
+  batch-cluster@17.0.0: {}
 
   brace-expansion@2.0.2:
     dependencies:
@@ -1255,6 +1295,23 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.8
 
+  exiftool-vendored.exe@13.45.0:
+    optional: true
+
+  exiftool-vendored.pl@13.45.0:
+    optional: true
+
+  exiftool-vendored@35.1.0:
+    dependencies:
+      '@photostructure/tz-lookup': 11.4.0
+      '@types/luxon': 3.7.1
+      batch-cluster: 17.0.0
+      he: 1.2.0
+      luxon: 3.7.2
+    optionalDependencies:
+      exiftool-vendored.exe: 13.45.0
+      exiftool-vendored.pl: 13.45.0
+
   expect-type@1.2.2: {}
 
   fdir@6.5.0(picomatch@4.0.3):
@@ -1293,6 +1350,8 @@ snapshots:
 
   has-flag@4.0.0: {}
 
+  he@1.2.0: {}
+
   html-escaper@2.0.2: {}
 
   is-fullwidth-code-point@3.0.0: {}
@@ -1325,6 +1384,8 @@ snapshots:
       p-locate: 5.0.0
 
   lru-cache@10.4.3: {}
+
+  luxon@3.7.2: {}
 
   magic-string@0.30.21:
     dependencies:

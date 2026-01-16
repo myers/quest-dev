@@ -37,6 +37,7 @@
     "url": "https://github.com/myers/quest-dev"
   },
   "dependencies": {
+    "exiftool-vendored": "^35.1.0",
     "which": "^4.0.0",
     "yargs": "^18.0.0"
   },
