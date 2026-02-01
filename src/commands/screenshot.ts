@@ -3,9 +3,33 @@
  * Triggers Quest's native screenshot service and pulls the file
  */
 
-import { resolve } from 'path';
+import { resolve, join } from 'path';
+import { existsSync, statSync } from 'fs';
 import { checkADBPath, checkADBDevices, checkUSBFileTransfer, checkQuestAwake } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
+import { generateScreenshotFilename } from '../utils/filename.js';
+
+/**
+ * Validate directory exists and is writable
+ */
+function validateDirectory(dirPath: string): void {
+  const resolvedPath = resolve(dirPath);
+
+  if (!existsSync(resolvedPath)) {
+    console.error(`Error: Directory does not exist: ${resolvedPath}`);
+    console.error('');
+    console.error('Please create the directory first.');
+    console.error('');
+    process.exit(1);
+  }
+
+  const stat = statSync(resolvedPath);
+  if (!stat.isDirectory()) {
+    console.error(`Error: Path is not a directory: ${resolvedPath}`);
+    console.error('');
+    process.exit(1);
+  }
+}
 
 /**
  * Trigger Quest screenshot service
@@ -107,12 +131,35 @@ async function deleteRemoteScreenshot(filename: string): Promise<void> {
 }
 
 /**
+ * Add caption to JPEG COM metadata
+ */
+async function addJpegMetadata(filePath: string, caption: string): Promise<boolean> {
+  try {
+    const { exiftool } = await import('exiftool-vendored');
+    await exiftool.write(filePath, { Comment: caption });
+    await exiftool.end();
+    console.log(`Caption added: "${caption}"`);
+    return true;
+  } catch (error) {
+    console.error('Warning: Failed to add caption metadata:', (error as Error).message);
+    return false;
+  }
+}
+
+/**
  * Main screenshot command handler
  */
-export async function screenshotCommand(outputPath: string): Promise<void> {
-  const resolvedPath = resolve(outputPath);
+export async function screenshotCommand(directoryPath: string, caption: string | undefined): Promise<void> {
+  const resolvedDir = resolve(directoryPath);
 
   console.log('\nQuest Screenshot\n');
+
+  // Validate directory (fail-fast before expensive ADB ops)
+  validateDirectory(resolvedDir);
+
+  // Generate filename
+  const localFilename = generateScreenshotFilename();
+  const outputPath = join(resolvedDir, localFilename);
 
   // Check prerequisites
   checkADBPath();
@@ -130,7 +177,7 @@ export async function screenshotCommand(outputPath: string): Promise<void> {
 
   // Wait for screenshot to save and verify it's complete (has JPEG EOI marker)
   console.log('Waiting for screenshot to save...');
-  let filename: string | null = null;
+  let questFilename: string | null = null;
   const maxAttempts = 20;
 
   for (let i = 0; i < maxAttempts; i++) {
@@ -141,14 +188,14 @@ export async function screenshotCommand(outputPath: string): Promise<void> {
       // Check that the JPEG is fully written (has EOI marker)
       const complete = await isJpegComplete(newScreenshot);
       if (complete) {
-        filename = newScreenshot;
-        console.log(`Screenshot ready: ${filename}`);
+        questFilename = newScreenshot;
+        console.log(`Screenshot ready: ${questFilename}`);
         break;
       }
     }
   }
 
-  if (!filename) {
+  if (!questFilename) {
     console.error('Error: Screenshot was not created or is incomplete');
     console.error('');
     console.error('The screenshot service was triggered but no valid screenshot appeared.');
@@ -162,12 +209,17 @@ export async function screenshotCommand(outputPath: string): Promise<void> {
   }
 
   // Pull screenshot
-  if (!await pullScreenshot(filename, resolvedPath)) {
+  if (!await pullScreenshot(questFilename, outputPath)) {
     process.exit(1);
   }
 
+  // Add metadata (non-fatal, only if caption provided)
+  if (caption) {
+    await addJpegMetadata(outputPath, caption);
+  }
+
   // Delete from Quest after successful pull
-  await deleteRemoteScreenshot(filename);
+  await deleteRemoteScreenshot(questFilename);
 
   console.log('\nDone!\n');
 }

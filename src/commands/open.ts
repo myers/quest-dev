@@ -17,8 +17,8 @@ import { execCommand, execCommandFull } from '../utils/exec.js';
 /**
  * Close all tabs except the one with the target URL
  */
-async function closeOtherTabs(targetUrl: string): Promise<void> {
-  const cdpPort = getCDPPort();
+async function closeOtherTabs(targetUrl: string, browser: string): Promise<void> {
+  const cdpPort = await getCDPPort(browser);
 
   try {
     // Get list of tabs
@@ -66,8 +66,8 @@ async function closeOtherTabs(targetUrl: string): Promise<void> {
 /**
  * Try to navigate or reload existing tab via cdp-cli
  */
-async function tryNavigateExistingTab(targetUrl: string): Promise<boolean> {
-  const cdpPort = getCDPPort();
+async function tryNavigateExistingTab(targetUrl: string, browser: string): Promise<boolean> {
+  const cdpPort = await getCDPPort(browser);
 
   try {
     // Get list of tabs using cdp-cli
@@ -142,7 +142,11 @@ async function tryNavigateExistingTab(targetUrl: string): Promise<boolean> {
 /**
  * Main open command handler
  */
-export async function openCommand(url: string, closeOthers: boolean = false): Promise<void> {
+export async function openCommand(
+  url: string,
+  closeOthers: boolean = false,
+  browser: string = 'com.oculus.browser'
+): Promise<void> {
   // Parse URL to determine if we need reverse port forwarding
   let parsedUrl: URL;
   try {
@@ -175,27 +179,27 @@ export async function openCommand(url: string, closeOthers: boolean = false): Pr
   // Set up port forwarding
   if (port !== null) {
     // Localhost URL: need reverse forwarding so Quest can reach the dev server
-    await ensurePortForwarding(port);
+    await ensurePortForwarding(port, browser);
   } else {
     // External URL: only need CDP forwarding to control the browser
-    await ensureCDPForwarding();
+    await ensureCDPForwarding(browser);
   }
 
   // Check if browser is running
-  const browserRunning = await isBrowserRunning();
+  const browserRunning = await isBrowserRunning(browser);
 
   if (!browserRunning) {
-    console.log('Quest browser is not running');
-    await launchBrowser(url);
+    console.log('Browser is not running');
+    await launchBrowser(url, browser);
   } else {
-    console.log('Quest browser is already running');
+    console.log('Browser is already running');
 
     // Try to navigate existing or blank tab via cdp-cli first
-    const navigated = await tryNavigateExistingTab(url);
+    const navigated = await tryNavigateExistingTab(url, browser);
 
     if (!navigated) {
       console.log('No existing or blank tab found, opening URL...');
-      await launchBrowser(url);
+      await launchBrowser(url, browser);
     }
   }
 
@@ -204,7 +208,7 @@ export async function openCommand(url: string, closeOthers: boolean = false): Pr
     // Wait for browser to stabilize after launch/navigation
     console.log('Waiting for browser to stabilize...');
     await new Promise(resolve => setTimeout(resolve, 2000));
-    await closeOtherTabs(url);
+    await closeOtherTabs(url, browser);
   }
 
   console.log('\nDone!\n');

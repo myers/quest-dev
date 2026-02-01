@@ -28,8 +28,8 @@ describe('isPortListening', () => {
 });
 
 describe('getCDPPort', () => {
-  it('should return the default CDP port', () => {
-    const port = getCDPPort();
+  it('should return the default CDP port', async () => {
+    const port = await getCDPPort();
     expect(port).toBe(9223);
   });
 });
