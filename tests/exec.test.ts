@@ -8,7 +8,7 @@ describe('execCommand', () => {
   });
 
   it('should reject on non-zero exit code', async () => {
-    await expect(execCommand('sh -c "exit 1"', [])).rejects.toThrow();
+    await expect(execCommand('sh', ['-c', 'exit 1'])).rejects.toThrow();
   });
 
   it('should handle shell commands', async () => {
@@ -25,12 +25,12 @@ describe('execCommandFull', () => {
   });
 
   it('should return non-zero exit code without throwing', async () => {
-    const result = await execCommandFull('sh -c "exit 42"', []);
+    const result = await execCommandFull('sh', ['-c', 'exit 42']);
     expect(result.code).toBe(42);
   });
 
   it('should capture stderr', async () => {
-    const result = await execCommandFull('sh -c "echo error >&2"', []);
+    const result = await execCommandFull('sh', ['-c', 'echo error >&2']);
     expect(result.stderr.trim()).toBe('error');
   });
 });
