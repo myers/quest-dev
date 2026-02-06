@@ -250,11 +250,13 @@ export async function statusCommand(): Promise<void> {
       console.log('');
       console.log('Recent logs:');
       try {
-        const result = await execCommandFull('ls', ['-lht', join(LOG_DIR, '*.txt')]);
-        if (result.code === 0) {
-          const lines = result.stdout.trim().split('\n').slice(0, 5);
-          lines.forEach(line => console.log('  ' + line));
-        }
+        const { readdirSync } = await import('fs');
+        const files = readdirSync(LOG_DIR)
+          .filter(f => f.endsWith('.txt'))
+          .map(f => ({ name: f, mtime: statSync(join(LOG_DIR, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime)
+          .slice(0, 5);
+        files.forEach(f => console.log('  ' + f.name));
       } catch {
         // Ignore
       }

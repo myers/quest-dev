@@ -17,7 +17,6 @@ export function execCommand(command: string, args: string[] = []): Promise<strin
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
       stdio: 'pipe',
-      shell: true
     });
 
     let stdout = '';
@@ -54,7 +53,6 @@ export function execCommandFull(command: string, args: string[] = []): Promise<E
   return new Promise((resolve) => {
     const proc = spawn(command, args, {
       stdio: 'pipe',
-      shell: true
     });
 
     let stdout = '';
