@@ -14,7 +14,7 @@ import { screenshotCommand } from './commands/screenshot.js';
 import { openCommand } from './commands/open.js';
 import { startCommand, stopCommand, statusCommand, tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
-import { stayAwakeCommand, stayAwakeWatchdog } from './commands/stay-awake.js';
+import { stayAwakeCommand, stayAwakeWatchdog, stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -155,17 +155,52 @@ cli.command(
 // Stay-awake command
 cli.command(
   'stay-awake',
-  'Keep Quest screen awake (sets 24hr timeout, restores on Ctrl-C)',
+  'Keep Quest awake (disables autosleep, guardian, dialogs)',
   (yargs) => {
-    return yargs.option('idle-timeout', {
-      describe: 'Idle timeout in milliseconds (default: 300000 = 5 minutes)',
-      type: 'number',
-      default: 300000,
-      alias: 'i'
-    });
+    return yargs
+      .option('pin', {
+        describe: 'Meta Store PIN (or set in .quest-dev.json / ~/.config/quest-dev/config.json)',
+        type: 'string',
+      })
+      .option('idle-timeout', {
+        describe: 'Idle timeout in milliseconds (default: 300000 = 5 minutes, or set idleTimeout in config)',
+        type: 'number',
+        alias: 'i',
+      })
+      .option('low-battery', {
+        describe: 'Exit when battery drops to this percentage (default: 10, or set lowBattery in config)',
+        type: 'number',
+      })
+      .option('disable', {
+        describe: 'Manually restore all test properties and exit',
+        type: 'boolean',
+        default: false,
+      })
+      .option('status', {
+        describe: 'Show current property values and exit',
+        type: 'boolean',
+        default: false,
+      })
+      .option('verbose', {
+        describe: 'Print battery level on every check (every 60s)',
+        type: 'boolean',
+        default: false,
+        alias: 'v',
+      });
   },
   async (argv) => {
-    await stayAwakeCommand(argv.idleTimeout as number);
+    if (argv.status) {
+      await stayAwakeStatus();
+    } else if (argv.disable) {
+      await stayAwakeDisable(argv.pin as string | undefined);
+    } else {
+      await stayAwakeCommand(
+        argv.pin as string | undefined,
+        argv.idleTimeout as number | undefined,
+        argv.lowBattery as number | undefined,
+        argv.verbose as boolean,
+      );
+    }
   }
 );
 
@@ -177,15 +212,15 @@ cli.command(
     return yargs
       .option('parent-pid', {
         type: 'number',
-        demandOption: true
+        demandOption: true,
       })
-      .option('original-timeout', {
-        type: 'number',
-        demandOption: true
+      .option('pin', {
+        type: 'string',
+        demandOption: true,
       });
   },
   async (argv) => {
-    await stayAwakeWatchdog(argv.parentPid as number, argv.originalTimeout as number);
+    await stayAwakeWatchdog(argv.parentPid as number, argv.pin as string);
   }
 );
 

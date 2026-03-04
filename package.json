@@ -1,7 +1,7 @@
 {
   "name": "@myerscarpenter/quest-dev",
-  "version": "1.2.1",
-  "description": "CLI for Meta Quest Browser development - screenshot and URL opening via ADB and cdp-cli",
+  "version": "1.3.0",
+  "description": "CLI tools for Meta Quest development — stay awake, screenshots, URL opening, logcat, and battery via ADB",
   "type": "module",
   "bin": {
     "quest-dev": "./build/index.js"

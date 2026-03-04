@@ -345,18 +345,21 @@ export async function checkQuestAwake(): Promise<void> {
   }
 }
 
+export interface BatteryInfo {
+  level: number;
+  state: 'fast charging' | 'charging' | 'not charging';
+}
+
 /**
- * Get Quest battery status
- * Returns percentage and charging state in one line
+ * Get Quest battery info as structured data
  */
-export async function getBatteryStatus(): Promise<string> {
+export async function getBatteryInfo(): Promise<BatteryInfo> {
   const result = await execCommandFull('adb', ['shell', 'dumpsys', 'battery']);
 
   if (result.code !== 0) {
     throw new Error('Failed to get battery status');
   }
 
-  // Parse battery info
   let level = 0;
   let acPowered = false;
   let usbPowered = false;
@@ -376,18 +379,19 @@ export async function getBatteryStatus(): Promise<string> {
     }
   }
 
-  // Determine charging state
-  let state: string;
+  let state: BatteryInfo['state'];
   if (acPowered || usbPowered) {
-    // Fast charging is typically > 2A (2000000 microamps)
-    if (maxChargingCurrent > 2000000) {
-      state = 'fast charging';
-    } else {
-      state = 'charging';
-    }
+    state = maxChargingCurrent > 2000000 ? 'fast charging' : 'charging';
   } else {
     state = 'not charging';
   }
 
-  return `${level}% ${state}`;
+  return { level, state };
+}
+
+/**
+ * Format battery info as a human-readable string
+ */
+export function formatBatteryInfo(info: BatteryInfo): string {
+  return `${info.level}% ${info.state}`;
 }

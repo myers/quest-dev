@@ -1,43 +1,100 @@
 /**
  * Quest stay-awake command
- * Keeps Quest screen awake by setting screen timeout to 24 hours
- * Restores original timeout on exit (Ctrl-C)
+ * Uses Meta Scriptable Testing API (content://com.oculus.rc) to disable
+ * autosleep, guardian, and system dialogs for automated testing.
+ *
+ * Cleanup is critical: with autosleep disabled, the headset drains battery
+ * quickly. A watchdog child process ensures cleanup happens even if the
+ * parent is killed (TaskStop, terminal close, claude code exit).
  */
 
-import { checkADBPath } from '../utils/adb.js';
-import { execCommand } from '../utils/exec.js';
+import { checkADBPath, getBatteryInfo, formatBatteryInfo } from '../utils/adb.js';
+import { loadPin, loadConfig } from '../utils/config.js';
+import { execCommand, execCommandFull } from '../utils/exec.js';
 import { execSync, spawn, ChildProcess } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 
-/**
- * Get current screen timeout setting
- */
-async function getScreenTimeout(): Promise<number> {
-  const output = await execCommand('adb', ['shell', 'settings', 'get', 'system', 'screen_off_timeout']);
-  return parseInt(output.trim(), 10);
+export interface TestProperties {
+  disable_guardian: boolean;
+  disable_dialogs: boolean;
+  disable_autosleep: boolean;
+  set_proximity_close: boolean;
 }
 
 /**
- * Set screen timeout (in milliseconds)
+ * Build ADB args for SET_PROPERTY call
  */
-async function setScreenTimeout(timeout: number): Promise<void> {
-  await execCommand('adb', ['shell', 'settings', 'put', 'system', 'screen_off_timeout', timeout.toString()]);
+export function buildSetPropertyArgs(pin: string, enabled: boolean): string[] {
+  return [
+    'shell', 'content', 'call',
+    '--uri', 'content://com.oculus.rc',
+    '--method', 'SET_PROPERTY',
+    '--extra', `disable_guardian:b:${enabled}`,
+    '--extra', `disable_dialogs:b:${enabled}`,
+    '--extra', `disable_autosleep:b:${enabled}`,
+    '--extra', `set_proximity_close:b:${enabled}`,
+    '--extra', `PIN:s:${pin}`,
+  ];
 }
 
 /**
- * Disable Quest proximity sensor (keeps screen on even when not worn)
+ * Parse GET_PROPERTY Bundle output into structured data
+ * Input: "Bundle[{disable_guardian=true, set_proximity_close=true, disable_dialogs=true, disable_autosleep=true}]"
  */
-async function disableProximitySensor(): Promise<void> {
-  await execCommand('adb', ['shell', 'am', 'broadcast', '-a', 'com.oculus.vrpowermanager.prox_close']);
+export function parseTestProperties(output: string): TestProperties {
+  const defaults: TestProperties = {
+    disable_guardian: false,
+    disable_dialogs: false,
+    disable_autosleep: false,
+    set_proximity_close: false,
+  };
+
+  const match = output.match(/Bundle\[\{(.+)\}\]/);
+  if (!match) return defaults;
+
+  const pairs = match[1].split(',').map(s => s.trim());
+  for (const pair of pairs) {
+    const [key, value] = pair.split('=');
+    if (key && value && key in defaults) {
+      (defaults as any)[key] = value === 'true';
+    }
+  }
+
+  return defaults;
 }
 
 /**
- * Enable Quest proximity sensor (re-enable normal behavior)
- * Note: automation_disable actually RE-ENABLES normal proximity sensor automation
+ * Call SET_PROPERTY to enable or disable test mode
  */
-async function enableProximitySensor(): Promise<void> {
-  await execCommand('adb', ['shell', 'am', 'broadcast', '-a', 'com.oculus.vrpowermanager.automation_disable']);
+async function setTestProperties(pin: string, enabled: boolean): Promise<void> {
+  const args = buildSetPropertyArgs(pin, enabled);
+  await execCommand('adb', args);
+}
+
+/**
+ * Call GET_PROPERTY and return parsed test properties
+ */
+async function getTestProperties(): Promise<TestProperties> {
+  const result = await execCommandFull('adb', [
+    'shell', 'content', 'call',
+    '--uri', 'content://com.oculus.rc',
+    '--method', 'GET_PROPERTY',
+  ]);
+  return parseTestProperties(result.stdout);
+}
+
+/**
+ * Format test properties for display
+ */
+function formatTestProperties(props: TestProperties): string {
+  const lines = [
+    `  Guardian disabled:  ${props.disable_guardian}`,
+    `  Dialogs disabled:  ${props.disable_dialogs}`,
+    `  Autosleep disabled: ${props.disable_autosleep}`,
+    `  Proximity close:   ${props.set_proximity_close}`,
+  ];
+  return lines.join('\n');
 }
 
 /**
@@ -48,34 +105,46 @@ async function wakeScreen(): Promise<void> {
 }
 
 /**
+ * Show current test properties status
+ */
+export async function stayAwakeStatus(): Promise<void> {
+  checkADBPath();
+  const props = await getTestProperties();
+  console.log('Scriptable Testing properties:');
+  console.log(formatTestProperties(props));
+}
+
+/**
+ * Manually disable test mode (restore all properties)
+ */
+export async function stayAwakeDisable(cliPin?: string): Promise<void> {
+  checkADBPath();
+  const pin = loadPin(cliPin);
+  await setTestProperties(pin, false);
+  console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
+}
+
+/**
  * Child watchdog process - polls for parent death and cleans up
  */
-export async function stayAwakeWatchdog(parentPid: number, originalTimeout: number): Promise<void> {
-  const pollInterval = 5000; // Check every 5 seconds
+export async function stayAwakeWatchdog(parentPid: number, pin: string): Promise<void> {
+  const pollInterval = 5000;
 
   const checkParent = setInterval(() => {
     try {
-      // Check if parent process still exists
       process.kill(parentPid, 0);
-      // Parent still alive, continue polling
     } catch {
-      // Parent is dead - perform cleanup
       console.log('Parent process died, restoring Quest settings...');
       clearInterval(checkParent);
 
-      // Restore settings synchronously
       try {
-        execSync(`adb shell settings put system screen_off_timeout ${originalTimeout}`, { stdio: 'ignore' });
-        execSync(`adb shell am broadcast -a com.oculus.vrpowermanager.automation_disable`, { stdio: 'ignore' });
+        const args = buildSetPropertyArgs(pin, false);
+        execSync(`adb ${args.join(' ')}`, { stdio: 'ignore' });
 
-        // Cleanup PID file
         const pidFile = `${os.homedir()}/.quest-dev-stay-awake.pid`;
-        try {
-          fs.unlinkSync(pidFile);
-        } catch {}
+        try { fs.unlinkSync(pidFile); } catch {}
 
-        console.log(`Screen timeout restored to ${originalTimeout}ms (${Math.round(originalTimeout / 1000)}s)`);
-        console.log('Proximity sensor re-enabled');
+        console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
       } catch (err) {
         console.error('Failed to restore settings:', (err as Error).message);
       }
@@ -88,11 +157,15 @@ export async function stayAwakeWatchdog(parentPid: number, originalTimeout: numb
 /**
  * Main stay-awake command handler
  */
-export async function stayAwakeCommand(idleTimeout: number = 300000): Promise<void> {
-  // Check prerequisites
+export async function stayAwakeCommand(
+  cliPin?: string,
+  cliIdleTimeout?: number,
+  cliLowBattery?: number,
+  verbose: boolean = false,
+): Promise<void> {
   checkADBPath();
 
-  // Check devices without verbose output
+  // Check devices
   try {
     const output = await execCommand('adb', ['devices']);
     const lines = output.trim().split('\n').slice(1);
@@ -107,81 +180,87 @@ export async function stayAwakeCommand(idleTimeout: number = 300000): Promise<vo
     process.exit(1);
   }
 
+  const config = loadConfig();
+  const pin = loadPin(cliPin);
+  const idleTimeout = cliIdleTimeout ?? config.idleTimeout ?? 300000;
+  const lowBattery = cliLowBattery ?? config.lowBattery ?? 10;
+
   // PID file management
   const pidFilePath = `${os.homedir()}/.quest-dev-stay-awake.pid`;
 
-  // Check for existing process
   if (fs.existsSync(pidFilePath)) {
     const existingPid = parseInt(fs.readFileSync(pidFilePath, 'utf-8'));
     try {
-      process.kill(existingPid, 0); // Test if process exists
+      process.kill(existingPid, 0);
       console.error(`Error: stay-awake is already running (PID: ${existingPid})`);
       process.exit(1);
     } catch {
-      // Process dead, cleanup stale PID file
       fs.unlinkSync(pidFilePath);
     }
   }
 
-  // Get original timeout
-  let originalTimeout: number;
-
-  try {
-    originalTimeout = await getScreenTimeout();
-    console.log(`Original screen timeout: ${originalTimeout}ms (${Math.round(originalTimeout / 1000)}s)`);
-  } catch (error) {
-    console.error('Failed to get current screen timeout');
-    process.exit(1);
-  }
+  // Show current state
+  const beforeProps = await getTestProperties();
+  console.log('Current test properties:');
+  console.log(formatTestProperties(beforeProps));
 
   // Write PID file
   try {
     fs.writeFileSync(pidFilePath, process.pid.toString());
   } catch (error) {
-    console.warn('Failed to write PID file, hook will not work');
+    console.warn('Failed to write PID file');
   }
 
-  // Spawn child watchdog process
+  // Spawn watchdog child process
   let childProcess: ChildProcess | null = null;
   try {
     childProcess = spawn(process.execPath, [
-      process.argv[1], // quest-dev script path
+      process.argv[1],
       'stay-awake-watchdog',
       '--parent-pid', process.pid.toString(),
-      '--original-timeout', originalTimeout.toString()
+      '--pin', pin,
     ], {
       detached: true,
-      stdio: 'ignore'
+      stdio: 'ignore',
     });
-
-    childProcess.unref(); // Allow parent to exit without waiting for child
+    childProcess.unref();
   } catch (error) {
     console.warn('Failed to spawn watchdog child process');
   }
 
-  // Wake screen and disable proximity sensor
+  // Enable test mode
   try {
-    await wakeScreen();
-    console.log('Quest screen woken up');
-
-    await disableProximitySensor();
-    console.log('Proximity sensor disabled');
+    await setTestProperties(pin, true);
+    console.log('Test mode enabled — guardian, dialogs, and autosleep disabled');
   } catch (error) {
-    console.error('Failed to wake screen or disable proximity sensor:', (error as Error).message);
-  }
-
-  // Set timeout to 24 hours (86400000ms)
-  const longTimeout = 86400000;
-  try {
-    await setScreenTimeout(longTimeout);
-    console.log(`Screen timeout set to 24 hours`);
-    console.log(`Quest will stay awake (idle timeout: ${Math.round(idleTimeout / 1000)}s). Press Ctrl-C to restore original settings.`);
-  } catch (error) {
-    console.error('Failed to set screen timeout');
+    console.error('Failed to enable test mode:', (error as Error).message);
+    console.error('Requires Quest OS v44+ and a valid Meta Store PIN.');
     process.exit(1);
   }
 
-  // Idle timer mechanism
+  // Wake screen
+  try {
+    await wakeScreen();
+    console.log('Quest screen woken up');
+  } catch (error) {
+    console.error('Failed to wake screen:', (error as Error).message);
+  }
+
+  // Battery monitoring state
+  let lastReportedBucket = -1; // Track 5% boundary crossings
+
+  // Initial battery check
+  try {
+    const battery = await getBatteryInfo();
+    console.log(`Battery: ${formatBatteryInfo(battery)}`);
+    lastReportedBucket = Math.floor(battery.level / 5) * 5;
+  } catch (error) {
+    console.warn('Failed to read battery status');
+  }
+
+  console.log(`Quest will stay awake (idle timeout: ${Math.round(idleTimeout / 1000)}s, low battery exit: ${lowBattery}%). Press Ctrl-C to restore.`);
+
+  // Idle timer
   let idleTimerHandle: NodeJS.Timeout | null = null;
   let cleanupInProgress = false;
 
@@ -193,62 +272,71 @@ export async function stayAwakeCommand(idleTimeout: number = 300000): Promise<vo
     }, idleTimeout);
   };
 
-  // Set up cleanup on exit (must be synchronous for signal handlers)
+  // Cleanup handler
   const cleanup = () => {
-    if (cleanupInProgress) return; // Guard against double-cleanup
+    if (cleanupInProgress) return;
     cleanupInProgress = true;
 
-    // Clear idle timer
     if (idleTimerHandle) clearTimeout(idleTimerHandle);
+    if (batteryInterval) clearInterval(batteryInterval);
 
-    // Kill child watchdog
     if (childProcess) {
-      try {
-        childProcess.kill();
-      } catch {}
+      try { childProcess.kill(); } catch {}
     }
 
-    console.log('\nRestoring original settings...');
+    console.log('\nRestoring settings...');
     try {
-      // Remove PID file
-      try {
-        fs.unlinkSync(pidFilePath);
-      } catch {}
+      try { fs.unlinkSync(pidFilePath); } catch {}
 
-      // Restore Quest settings
-      execSync(`adb shell settings put system screen_off_timeout ${originalTimeout}`, { stdio: 'ignore' });
-      execSync(`adb shell am broadcast -a com.oculus.vrpowermanager.automation_disable`, { stdio: 'ignore' });
-      console.log(`Screen timeout restored to ${originalTimeout}ms (${Math.round(originalTimeout / 1000)}s)`);
-      console.log(`Proximity sensor re-enabled`);
+      const args = buildSetPropertyArgs(pin, false);
+      execSync(`adb ${args.join(' ')}`, { stdio: 'ignore' });
+      console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
     } catch (error) {
       console.error('Failed to restore settings:', (error as Error).message);
     }
     process.exit(0);
   };
 
-  // Handle Ctrl-C and termination
+  // Signal handlers
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
   process.on('SIGHUP', cleanup);
 
-  // Handle SIGUSR1 for activity reset
+  // Activity reset via SIGUSR1
   process.on('SIGUSR1', () => {
-    console.log('Activity detected, resetting idle timer');
+    const now = new Date().toLocaleTimeString();
+    console.log(`[${now}] Activity detected, resetting idle timer`);
     resetIdleTimer();
   });
 
   // Start idle timer
   resetIdleTimer();
 
-  // Keep process running with an interval that does nothing
-  console.log('Keeping Quest awake...');
-  setInterval(() => {
-    // Do nothing, just keep process alive
-  }, 60000); // Check every minute
+  // Battery monitoring loop (every 60s)
+  const batteryInterval = setInterval(async () => {
+    try {
+      const battery = await getBatteryInfo();
+      const currentBucket = Math.floor(battery.level / 5) * 5;
 
-  // Prevent process from exiting
+      if (verbose) {
+        console.log(`Battery: ${formatBatteryInfo(battery)}`);
+      } else if (currentBucket !== lastReportedBucket) {
+        console.log(`Battery: ${formatBatteryInfo(battery)}`);
+      }
+      lastReportedBucket = currentBucket;
+
+      if (battery.level <= lowBattery && battery.state === 'not charging') {
+        console.log(`\nBattery critically low (${battery.level}%), exiting to preserve battery...`);
+        cleanup();
+      }
+    } catch {
+      // Ignore battery check failures (device might be briefly unavailable)
+    }
+  }, 60000);
+
+  // Keep process alive
+  console.log('Keeping Quest awake...');
   await new Promise<void>((resolve) => {
-    // This will only resolve when cleanup is called
     process.on('exit', () => resolve());
   });
 }

@@ -3,7 +3,7 @@
  * Shows battery percentage and charging status
  */
 
-import { checkADBPath, checkADBDevices, getBatteryStatus } from '../utils/adb.js';
+import { checkADBPath, getBatteryInfo, formatBatteryInfo } from '../utils/adb.js';
 
 /**
  * Main battery command handler
@@ -29,6 +29,6 @@ export async function batteryCommand(): Promise<void> {
   }
 
   // Get and display battery status
-  const status = await getBatteryStatus();
-  console.log(status);
+  const info = await getBatteryInfo();
+  console.log(formatBatteryInfo(info));
 }
