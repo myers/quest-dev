@@ -15,6 +15,7 @@ import { openCommand } from './commands/open.js';
 import { startCommand, stopCommand, statusCommand, tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
 import { stayAwakeCommand, stayAwakeWatchdog, stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
+import { saveConfig, loadConfig } from './utils/config.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -28,16 +29,11 @@ const cli = yargs(hideBin(process.argv))
   .scriptName('quest-dev')
   .version(version)
   .usage('Usage: $0 <command> [options]')
-  .demandCommand(1, 'You must provide a command')
+  .demandCommand(1, '')
   .strict()
   .fail((msg, err, yargs) => {
-    if (msg) {
-      console.error(`Error: ${msg}\n`);
-    }
-    if (err) {
-      console.error(err.message);
-    }
-    console.error('Run "quest-dev --help" for usage information.');
+    yargs.showHelp();
+    if (err) console.error(err.message);
     process.exit(1);
   })
   .help()
@@ -159,16 +155,16 @@ cli.command(
   (yargs) => {
     return yargs
       .option('pin', {
-        describe: 'Meta Store PIN (or set in .quest-dev.json / ~/.config/quest-dev/config.json)',
+        describe: 'Meta Store PIN (or save with: quest-dev config --pin)',
         type: 'string',
       })
       .option('idle-timeout', {
-        describe: 'Idle timeout in milliseconds (default: 300000 = 5 minutes, or set idleTimeout in config)',
+        describe: 'Idle timeout in milliseconds (default: 300000 = 5 minutes, or save with: quest-dev config)',
         type: 'number',
         alias: 'i',
       })
       .option('low-battery', {
-        describe: 'Exit when battery drops to this percentage (default: 10, or set lowBattery in config)',
+        describe: 'Exit when battery drops to this percentage (default: 10, or save with: quest-dev config)',
         type: 'number',
       })
       .option('disable', {
@@ -201,6 +197,57 @@ cli.command(
         argv.verbose as boolean,
       );
     }
+  }
+);
+
+// Config command
+cli.command(
+  'config',
+  'Save default settings for quest-dev commands',
+  (yargs) => {
+    return yargs
+      .option('pin', {
+        describe: 'Meta Store PIN',
+        type: 'string',
+      })
+      .option('idle-timeout', {
+        describe: 'Idle timeout in milliseconds for stay-awake',
+        type: 'number',
+      })
+      .option('low-battery', {
+        describe: 'Exit stay-awake when battery drops to this percentage',
+        type: 'number',
+      })
+      .option('show', {
+        describe: 'Show current config and exit',
+        type: 'boolean',
+        default: false,
+      });
+  },
+  (argv) => {
+    if (argv.show) {
+      const config = loadConfig();
+      if (Object.keys(config).length === 0) {
+        console.log('No config found.');
+      } else {
+        console.log(JSON.stringify(config, null, 2));
+      }
+      return;
+    }
+
+    const values: Record<string, unknown> = {};
+    if (argv.pin !== undefined) values.pin = argv.pin;
+    if (argv.idleTimeout !== undefined) values.idleTimeout = argv.idleTimeout;
+    if (argv.lowBattery !== undefined) values.lowBattery = argv.lowBattery;
+
+    if (Object.keys(values).length === 0) {
+      console.error('No config values provided. Use --pin, --idle-timeout, or --low-battery.');
+      process.exit(1);
+    }
+
+    saveConfig(values as any);
+    console.log('Config saved:');
+    console.log(JSON.stringify(values, null, 2));
   }
 );
 

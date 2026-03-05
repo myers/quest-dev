@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "install:global": "pnpm run build && pnpm pack && pnpm install -g $PWD/myerscarpenter-quest-dev-$(node -p \"require('./package.json').version\").tgz && rm myerscarpenter-quest-dev-$(node -p \"require('./package.json').version\").tgz",
     "version:patch": "pnpm version patch",
     "version:minor": "pnpm version minor",
     "version:major": "pnpm version major"
