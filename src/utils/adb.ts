@@ -5,6 +5,7 @@
 import which from 'which';
 import net from 'net';
 import { execCommand, execCommandFull } from './exec.js';
+import { verbose } from './verbose.js';
 
 const CDP_PORT = 9223; // Chrome DevTools Protocol port (Quest browser default)
 
@@ -14,18 +15,29 @@ const CDP_PORT = 9223; // Chrome DevTools Protocol port (Quest browser default)
 async function getBrowserPID(packageName: string): Promise<number | null> {
   try {
     const result = await execCommandFull('adb', ['shell', `ps | grep ${packageName}`]);
+    verbose('getBrowserPID ps output:', result.stdout?.trim());
     if (!result.stdout) return null;
 
     // Parse ps output: USER PID PPID ... NAME
+    // Only match the main process (exact package name at end of line), not
+    // child processes like :sandboxed_process0 or :privileged_process0
     const lines = result.stdout.trim().split('\n');
     for (const line of lines) {
       if (line.includes('grep')) continue; // Skip grep itself
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 2) {
-        return parseInt(parts[1], 10); // PID is second column
+        // Check that the process name is exactly the package (last column)
+        const processName = parts[parts.length - 1];
+        if (processName === packageName) {
+          const pid = parseInt(parts[1], 10);
+          verbose('getBrowserPID found PID:', pid, 'for', packageName);
+          return pid;
+        }
       }
     }
-  } catch {
+    verbose('getBrowserPID: no exact match for', packageName);
+  } catch (e) {
+    verbose('getBrowserPID error:', e);
     return null;
   }
   return null;
@@ -39,30 +51,40 @@ async function detectCDPSocket(packageName: string): Promise<string> {
   const pid = await getBrowserPID(packageName);
 
   if (pid) {
-    // Try PID-based socket first
-    try {
-      const result = await execCommandFull('adb', [
-        'shell',
-        `cat /proc/net/unix | grep chrome_devtools_remote_${pid}`
-      ]);
-      if (result.stdout.includes(`chrome_devtools_remote_${pid}`)) {
-        return `chrome_devtools_remote_${pid}`;
+    // Try PID-based socket, with retries (socket may take a moment to appear)
+    const socketName = `chrome_devtools_remote_${pid}`;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const result = await execCommandFull('adb', [
+          'shell',
+          `cat /proc/net/unix | grep ${socketName}`
+        ]);
+        if (result.stdout.includes(socketName)) {
+          verbose('detectCDPSocket: found PID-specific socket:', socketName, `(attempt ${attempt + 1})`);
+          return socketName;
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // Fall through to default
+      if (attempt < 4) {
+        verbose('detectCDPSocket: PID-specific socket not found yet, retrying in 1s...', `(attempt ${attempt + 1})`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
     }
+    verbose('detectCDPSocket: PID-specific socket not found after retries:', socketName);
   }
 
   // Default: generic socket (Quest Browser)
+  verbose('detectCDPSocket: falling back to generic chrome_devtools_remote');
   return 'chrome_devtools_remote';
 }
 
 /**
- * Get CDP port for a socket
- * Generic socket uses 9223, PID-based uses 9222
+ * Get CDP port for a socket.
+ * Always use 9223 regardless of socket type for consistency.
  */
-function getCDPPortForSocket(socket: string): number {
-  return socket === 'chrome_devtools_remote' ? 9223 : 9222;
+function getCDPPortForSocket(_socket: string): number {
+  return CDP_PORT;
 }
 
 /**
@@ -229,8 +251,22 @@ export async function ensurePortForwarding(
 export async function isBrowserRunning(browser: string = 'com.oculus.browser'): Promise<boolean> {
   try {
     const result = await execCommandFull('adb', ['shell', `ps | grep ${browser}`]);
-    return result.stdout.includes(browser);
+    verbose('isBrowserRunning ps output:', result.stdout?.trim());
+    // Check for exact process name match (not _zygote or :sandboxed_process)
+    const lines = result.stdout?.trim().split('\n') || [];
+    for (const line of lines) {
+      if (line.includes('grep')) continue;
+      const parts = line.trim().split(/\s+/);
+      const processName = parts[parts.length - 1];
+      if (processName === browser) {
+        verbose('isBrowserRunning:', browser, 'YES (PID', parts[1] + ')');
+        return true;
+      }
+    }
+    verbose('isBrowserRunning:', browser, 'NO (zygote/child only)');
+    return false;
   } catch (error) {
+    verbose('isBrowserRunning error:', error);
     return false;
   }
 }
@@ -305,6 +341,44 @@ export async function ensureCDPForwarding(
   } catch (error) {
     console.error('Failed to set up CDP forwarding:', (error as Error).message);
     process.exit(1);
+  }
+}
+
+/**
+ * Re-detect CDP socket after browser launch and update forwarding if needed.
+ * This handles the case where the initial forwarding used the generic socket
+ * (before the browser had a PID), but the browser created a PID-specific socket.
+ */
+export async function refreshCDPForwarding(
+  browser: string = 'com.oculus.browser'
+): Promise<void> {
+  try {
+    const cdpSocket = await detectCDPSocket(browser);
+    const cdpPort = getCDPPortForSocket(cdpSocket);
+
+    // Check if forwarding already points to the correct socket
+    const forwardList = await execCommand('adb', ['forward', '--list']);
+    verbose('refreshCDPForwarding: detected socket:', cdpSocket, 'port:', cdpPort);
+    verbose('refreshCDPForwarding: current forwards:', forwardList.trim());
+
+    // Check exact match: the forward line must end with the exact socket name
+    const expectedForward = `tcp:${cdpPort} localabstract:${cdpSocket}`;
+    if (forwardList.includes(expectedForward)) {
+      verbose('refreshCDPForwarding: forwarding already correct');
+      return; // Already correct
+    }
+
+    // Remove existing forwarding on CDP port and re-create with correct socket
+    if (forwardList.includes(`tcp:${cdpPort}`)) {
+      verbose('refreshCDPForwarding: removing stale forwarding on port', cdpPort);
+      await execCommandFull('adb', ['forward', '--remove', `tcp:${cdpPort}`]);
+    }
+
+    await execCommand('adb', ['forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`]);
+    console.log(`CDP forwarding updated: Host:${cdpPort} -> Quest:${cdpSocket}`);
+  } catch (error) {
+    // Non-fatal: CDP may still work with existing forwarding
+    console.log('Warning: Could not refresh CDP forwarding:', (error as Error).message);
   }
 }
 

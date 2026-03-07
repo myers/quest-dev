@@ -8,6 +8,7 @@ import {
   checkADBDevices,
   ensurePortForwarding,
   ensureCDPForwarding,
+  refreshCDPForwarding,
   isBrowserRunning,
   launchBrowser,
   getCDPPort
@@ -203,11 +204,17 @@ export async function openCommand(
     }
   }
 
+  // Re-detect CDP socket now that browser is running.
+  // The initial forwarding may have used the generic socket before the browser
+  // had a PID, or may be stale from a previous browser process.
+  // Non-default browsers (e.g. org.chromium.chrome) often can't bind the generic
+  // chrome_devtools_remote socket and create a PID-specific one instead.
+  console.log('Waiting for browser to stabilize...');
+  await new Promise(resolve => setTimeout(resolve, browserRunning ? 2000 : 3000));
+  await refreshCDPForwarding(browser);
+
   // Close other tabs if requested
   if (closeOthers) {
-    // Wait for browser to stabilize after launch/navigation
-    console.log('Waiting for browser to stabilize...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
     await closeOtherTabs(url, browser);
   }
 

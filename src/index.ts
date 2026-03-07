@@ -16,6 +16,7 @@ import { startCommand, stopCommand, statusCommand, tailCommand } from './command
 import { batteryCommand } from './commands/battery.js';
 import { stayAwakeCommand, stayAwakeWatchdog, stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
 import { saveConfig, loadConfig } from './utils/config.js';
+import { setVerbose } from './utils/verbose.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,12 @@ const cli = yargs(hideBin(process.argv))
   .usage('Usage: $0 <command> [options]')
   .demandCommand(1, '')
   .strict()
+  .option('verbose', {
+    describe: 'Show detailed debug output',
+    type: 'boolean',
+    default: false,
+    global: true,
+  })
   .fail((msg, err, yargs) => {
     yargs.showHelp();
     if (err) console.error(err.message);
@@ -270,6 +277,13 @@ cli.command(
     await stayAwakeWatchdog(argv.parentPid as number, argv.pin as string);
   }
 );
+
+// Set verbose flag before any command runs
+cli.middleware((argv) => {
+  if (argv.verbose) {
+    setVerbose(true);
+  }
+});
 
 // Parse and execute
 cli.parse();
