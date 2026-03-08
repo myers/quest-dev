@@ -93,6 +93,11 @@ async function setEye(mode) {
   if (r?.ok) toast("Eye mode: " + mode);
 }
 
+async function sendHome() {
+  const r = await api("POST", "/home");
+  if (r?.ok) toast("Home");
+}
+
 async function stopCast() {
   if (!confirm("Stop casting session?")) return;
   await api("POST", "/stop");

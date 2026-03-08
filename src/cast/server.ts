@@ -12,6 +12,7 @@ import { EYE_LEFT, EYE_RIGHT, EYE_STEREO } from "./protocol/mud.js";
 import { fileURLToPath } from "node:url";
 import { type CastSession } from "./session.js";
 import { verbose } from "../utils/verbose.js";
+import { execCommand } from "../utils/exec.js";
 import { screenToYawPitch } from "./pose.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -255,6 +256,15 @@ export async function createCastServer(
     if (!session.connected) return { error: "not connected" };
     session.resetView();
     return { ok: true, mode: "normal" };
+  });
+
+  app.post("/home", async () => {
+    try {
+      await execCommand("adb", ["shell", "input", "keyevent", "KEYCODE_HOME"]);
+      return { ok: true };
+    } catch {
+      return { error: "failed to send home key" };
+    }
   });
 
   app.post<{ Body: { type?: number; payload_hex?: string } }>("/mud", async (req) => {
