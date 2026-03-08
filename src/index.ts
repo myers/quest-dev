@@ -15,6 +15,7 @@ import { openCommand } from './commands/open.js';
 import { startCommand, stopCommand, statusCommand, tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
 import { stayAwakeCommand, stayAwakeWatchdog, stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
+import { castCommand } from './commands/cast.js';
 import { saveConfig, loadConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
 
@@ -152,6 +153,65 @@ cli.command(
   () => {},
   async () => {
     await batteryCommand();
+  }
+);
+
+// Cast command
+cli.command(
+  'cast',
+  'Cast Quest screen — streams video, serves REST API and web dashboard',
+  (yargs) => {
+    return yargs
+      .option('port', {
+        describe: 'HTTP server port',
+        type: 'number',
+        default: 8080,
+      })
+      .option('listen-port', {
+        describe: 'TCP listen port for Quest connections',
+        type: 'number',
+        default: 4445,
+      })
+      .option('pin', {
+        describe: 'Meta Store PIN for stay-awake (or save with: quest-dev config --pin)',
+        type: 'string',
+      })
+      .option('idle-timeout', {
+        describe: 'Idle timeout in ms (default: 300000 = 5 min)',
+        type: 'number',
+      })
+      .option('low-battery', {
+        describe: 'Exit when battery drops to this % (default: 10)',
+        type: 'number',
+      })
+      .option('width', {
+        describe: 'Initial capture width',
+        type: 'number',
+        default: 2064,
+      })
+      .option('height', {
+        describe: 'Initial capture height',
+        type: 'number',
+        default: 1162,
+      })
+      .option('open', {
+        describe: 'Open dashboard in default browser',
+        type: 'boolean',
+        default: false,
+      });
+  },
+  async (argv) => {
+    await castCommand({
+      port: argv.port as number,
+      listenPort: argv.listenPort as number,
+      pin: argv.pin as string | undefined,
+      idleTimeout: argv.idleTimeout as number | undefined,
+      lowBattery: argv.lowBattery as number | undefined,
+      width: argv.width as number,
+      height: argv.height as number,
+      verbose: argv.verbose as boolean,
+      open: argv.open as boolean,
+    });
   }
 );
 

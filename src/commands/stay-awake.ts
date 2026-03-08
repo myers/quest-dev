@@ -10,92 +10,21 @@
 
 import { checkADBPath, getBatteryInfo, formatBatteryInfo } from '../utils/adb.js';
 import { loadPin, loadConfig } from '../utils/config.js';
-import { execCommand, execCommandFull } from '../utils/exec.js';
+import { execCommand } from '../utils/exec.js';
 import { execSync, spawn, ChildProcess } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
+import {
+  type TestProperties,
+  buildSetPropertyArgs,
+  parseTestProperties,
+  setTestProperties,
+  getTestProperties,
+  formatTestProperties,
+} from '../utils/test-properties.js';
 
-export interface TestProperties {
-  disable_guardian: boolean;
-  disable_dialogs: boolean;
-  disable_autosleep: boolean;
-  set_proximity_close: boolean;
-}
-
-/**
- * Build ADB args for SET_PROPERTY call
- */
-export function buildSetPropertyArgs(pin: string, enabled: boolean): string[] {
-  return [
-    'shell', 'content', 'call',
-    '--uri', 'content://com.oculus.rc',
-    '--method', 'SET_PROPERTY',
-    '--extra', `disable_guardian:b:${enabled}`,
-    '--extra', `disable_dialogs:b:${enabled}`,
-    '--extra', `disable_autosleep:b:${enabled}`,
-    '--extra', `set_proximity_close:b:${enabled}`,
-    '--extra', `PIN:s:${pin}`,
-  ];
-}
-
-/**
- * Parse GET_PROPERTY Bundle output into structured data
- * Input: "Bundle[{disable_guardian=true, set_proximity_close=true, disable_dialogs=true, disable_autosleep=true}]"
- */
-export function parseTestProperties(output: string): TestProperties {
-  const defaults: TestProperties = {
-    disable_guardian: false,
-    disable_dialogs: false,
-    disable_autosleep: false,
-    set_proximity_close: false,
-  };
-
-  const match = output.match(/Bundle\[\{(.+)\}\]/);
-  if (!match) return defaults;
-
-  const pairs = match[1].split(',').map(s => s.trim());
-  for (const pair of pairs) {
-    const [key, value] = pair.split('=');
-    if (key && value && key in defaults) {
-      (defaults as any)[key] = value === 'true';
-    }
-  }
-
-  return defaults;
-}
-
-/**
- * Call SET_PROPERTY to enable or disable test mode
- */
-async function setTestProperties(pin: string, enabled: boolean): Promise<void> {
-  const args = buildSetPropertyArgs(pin, enabled);
-  await execCommand('adb', args);
-}
-
-/**
- * Call GET_PROPERTY and return parsed test properties
- */
-async function getTestProperties(): Promise<TestProperties> {
-  const result = await execCommandFull('adb', [
-    'shell', 'content', 'call',
-    '--uri', 'content://com.oculus.rc',
-    '--method', 'GET_PROPERTY',
-  ]);
-  return parseTestProperties(result.stdout);
-}
-
-/**
- * Format test properties for display
- */
-function formatTestProperties(props: TestProperties): string {
-  const lines = [
-    `  Guardian disabled:  ${props.disable_guardian}`,
-    `  Dialogs disabled:  ${props.disable_dialogs}`,
-    `  Autosleep disabled: ${props.disable_autosleep}`,
-    `  Proximity close:   ${props.set_proximity_close}`,
-  ];
-  return lines.join('\n');
-}
+// Re-export for backward compatibility with tests
+export { type TestProperties, buildSetPropertyArgs, parseTestProperties };
 
 /**
  * Wake the Quest screen

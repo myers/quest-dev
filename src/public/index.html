@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quest Cast</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header>
+  <div id="status-dot"></div>
+  <h1>Quest Cast</h1>
+  <div id="status-bar">
+    <span><span class="val" id="s-fps">--</span> fps</span>
+    <span><span class="val" id="s-res">--</span></span>
+    <span><span class="val" id="s-frames">--</span> frames</span>
+    <span><span class="val" id="s-bw">--</span> MB</span>
+  </div>
+</header>
+
+<div class="main">
+  <div class="video-pane" id="video-pane">
+    <img id="live-frame" alt="Quest view">
+    <div id="crosshair"></div>
+    <div id="drag-overlay"></div>
+  </div>
+
+  <div class="sidebar">
+    <div class="panel">
+      <h2>Movement (WASD / Arrow Keys)</h2>
+      <div class="btn-row" style="justify-content:center;">
+        <div style="display:grid; grid-template-columns: repeat(3,40px); grid-template-rows: repeat(2,34px); gap:4px;">
+          <div></div>
+          <button id="btn-fwd" class="secondary" title="W / Up">&#9650;</button>
+          <div></div>
+          <button id="btn-left" class="secondary" title="A / Left">&#9664;</button>
+          <button id="btn-back" class="secondary" title="S / Down">&#9660;</button>
+          <button id="btn-right" class="secondary" title="D / Right">&#9654;</button>
+        </div>
+      </div>
+      <div class="speed-control">
+        <label>Speed:</label>
+        <input type="number" id="move-speed" value="0.3" min="0.01" max="2" step="0.05">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Look (drag on video or IJKL)</h2>
+      <div class="control-row">
+        <label>Yaw</label>
+        <input type="range" id="yaw-slider" min="-1" max="1" step="0.01" value="0">
+        <span class="val-display" id="yaw-val">0</span>
+      </div>
+      <div class="control-row">
+        <label>Pitch</label>
+        <input type="range" id="pitch-slider" min="-1" max="1" step="0.01" value="0">
+        <span class="val-display" id="pitch-val">0</span>
+      </div>
+      <div class="speed-control">
+        <label>Sensitivity:</label>
+        <input type="number" id="look-speed" value="0.15" min="0.01" max="1" step="0.01">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Resolution</h2>
+      <div class="preset-grid">
+        <button onclick="setConfig(2064,1162)">2064x1162</button>
+        <button onclick="setConfig(1920,1080)" class="secondary">1920x1080</button>
+        <button onclick="setConfig(1280,720)" class="secondary">1280x720</button>
+        <button onclick="setConfig(2064,2208)" class="secondary">Stereo</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Eye</h2>
+      <div class="btn-row">
+        <button onclick="setEye('left')">Left</button>
+        <button onclick="setEye('right')" class="secondary">Right</button>
+        <button onclick="setEye('stereo')" class="secondary">Stereo</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Interact</h2>
+      <div class="btn-row">
+        <button onclick="sendClick()" style="flex:1;">Click at gaze center</button>
+      </div>
+      <div class="keybind-hint">
+        <b>Space</b> or <b>Enter</b> &mdash; click &nbsp; <b>Right-click</b> on video &mdash; click
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Pose</h2>
+      <div id="pose-display" style="font-size:11px; font-family:monospace; line-height:1.6; color:var(--dim);">
+        <div>pos: <span class="val" id="p-xyz">0, 0, 0</span></div>
+        <div>rot: <span class="val" id="p-yp">0, 0</span></div>
+      </div>
+      <div class="btn-row" style="margin-top:8px;">
+        <button onclick="resetPose()" class="secondary" style="flex:1;">Reset Pose</button>
+        <button onclick="goHome()" class="secondary" style="flex:1;">Home (0,0,0)</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Capture</h2>
+      <div class="btn-row">
+        <button onclick="saveScreenshot()">Save Screenshot</button>
+        <button onclick="openStream()" class="secondary">MJPEG Stream</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Session</h2>
+      <button id="session-btn" onclick="stopCast()" class="danger" style="width:100%;">Stop Casting</button>
+    </div>
+
+    <div class="panel">
+      <h2>Keyboard Shortcuts</h2>
+      <div class="keybind-hint">
+        <b>WASD</b> / <b>Arrows</b> &mdash; move<br>
+        <b>IJKL</b> &mdash; look (pitch/yaw)<br>
+        <b>QE</b> &mdash; up/down<br>
+        <b>Space</b> / <b>Enter</b> &mdash; click at gaze<br>
+        <b>Click+drag</b> on video &mdash; free look<br>
+        <b>Right-click</b> on video &mdash; click at gaze<br>
+        <b>P</b> &mdash; save screenshot<br>
+        <b>Esc</b> &mdash; reset pose
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/dashboard.js"></script>
+</body>
+</html>
