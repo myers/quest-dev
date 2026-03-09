@@ -10,6 +10,7 @@ import fastifyStatic from "@fastify/static";
 import { join, dirname } from "node:path";
 import { EYE_LEFT, EYE_RIGHT, EYE_STEREO } from "./protocol/mud.js";
 import { fileURLToPath } from "node:url";
+import type { ServerResponse } from "node:http";
 import { type CastSession } from "./session.js";
 import { verbose } from "../utils/verbose.js";
 import { execCommand } from "../utils/exec.js";
@@ -44,6 +45,43 @@ export async function createCastServer(
     prefix: "/",
     decorateReply: false,
   });
+
+  // --- SSE broadcast ---
+  const sseClients = new Set<ServerResponse>();
+
+  function broadcast(event: string, data: unknown): void {
+    const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const res of sseClients) {
+      res.write(msg);
+    }
+  }
+
+  // Wire up session events to SSE
+  session.on("connected", () => broadcast("state", { connected: true, running: true }));
+  session.on("disconnected", () => broadcast("state", { connected: false, running: false, pose_loop: false }));
+  session.on("pose-loop", (active: boolean) => broadcast("state", { pose_loop: active }));
+
+  app.get("/events", async (_req, reply) => {
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    });
+    // Send current state immediately
+    const init = {
+      connected: session.connected,
+      running: session.running,
+      pose_loop: session.poseLoopActive,
+    };
+    reply.raw.write(`event: state\ndata: ${JSON.stringify(init)}\n\n`);
+    sseClients.add(reply.raw);
+    _req.raw.on("close", () => sseClients.delete(reply.raw));
+  });
+
+  // Helper to broadcast a toast to all dashboard clients
+  function broadcastToast(msg: string): void {
+    broadcast("toast", { message: msg });
+  }
 
   // --- GET endpoints ---
 
@@ -139,6 +177,7 @@ export async function createCastServer(
     const width = req.body?.width ?? session.width;
     const height = req.body?.height ?? session.height;
     session.sendDisplayConfig(width, height);
+    broadcastToast(`Resolution: ${width}\u00d7${height}`);
     return { ok: true, width, height };
   });
 
@@ -153,6 +192,7 @@ export async function createCastServer(
     };
     const eye = eyeMap[mode] ?? EYE_LEFT;
     session.sendDisplayConfig(session.width, session.height, eye);
+    broadcastToast(`Eye mode: ${mode}`);
     return { ok: true, mode };
   });
 
@@ -254,11 +294,12 @@ export async function createCastServer(
   app.post("/stop", async () => {
     if (!session.connected) return { error: "not connected" };
     await session.stop();
+    broadcastToast("Casting stopped");
     return { ok: true };
   });
 
   app.post("/restart", async () => {
-    // Fire and forget restart
+    broadcastToast("Restarting cast\u2026");
     session.restart().catch((err) => verbose("Restart error:", err));
     return { ok: true, msg: "restarting cast session" };
   });
@@ -266,12 +307,15 @@ export async function createCastServer(
   app.post("/reset-view", async () => {
     if (!session.connected) return { error: "not connected" };
     session.resetView();
+    broadcastToast("View reset");
+    broadcast("state", { pose_loop: false });
     return { ok: true, mode: "normal" };
   });
 
   app.post("/home", async () => {
     try {
       await execCommand("adb", ["shell", "input", "keyevent", "KEYCODE_HOME"]);
+      broadcastToast("Home");
       return { ok: true };
     } catch {
       return { error: "failed to send home key" };

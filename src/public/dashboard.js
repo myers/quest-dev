@@ -15,15 +15,38 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2000);
 }
 
-// --- Status polling ---
+// --- SSE for state broadcasts ---
+function connectSSE() {
+  const es = new EventSource("/events");
+  es.addEventListener("state", (e) => {
+    const s = JSON.parse(e.data);
+    if ("connected" in s || "running" in s) {
+      const wasConnected = connected;
+      if ("connected" in s) connected = s.connected && (s.running ?? connected);
+      if ("running" in s) connected = (s.connected ?? connected) && s.running;
+      $("#status-dot").className = connected ? "ok" : "";
+      if (connected !== wasConnected) updateSessionButton();
+    }
+    if ("pose_loop" in s) updatePoseLoopUI(s.pose_loop);
+  });
+  es.addEventListener("toast", (e) => {
+    const d = JSON.parse(e.data);
+    toast(d.message);
+  });
+  es.onerror = () => {
+    // EventSource auto-reconnects; just mark disconnected
+    connected = false;
+    $("#status-dot").className = "";
+    updateSessionButton();
+  };
+}
+connectSSE();
+
+// --- Status polling (stats only: fps, frames, bytes, pose, resolution) ---
 async function pollStatus() {
   try {
     const r = await fetch("/status");
     const s = await r.json();
-    const wasConnected = connected;
-    connected = s.connected && s.running;
-    $("#status-dot").className = connected ? "ok" : "";
-    if (connected !== wasConnected) updateSessionButton();
     $("#s-fps").textContent = s.fps;
     $("#s-res").textContent = s.width + "\u00d7" + s.height;
     $("#s-frames").textContent = s.frame_count.toLocaleString();
@@ -41,7 +64,6 @@ async function pollStatus() {
         s.pose.pitch_deg.toFixed(1) +
         "\u00b0 pitch";
     }
-    updatePoseLoopUI(s.pose_loop);
   } catch {}
 }
 setInterval(pollStatus, 1000);
@@ -85,31 +107,24 @@ async function sendMove(forward = 0, strafe = 0, yaw = 0, pitch = 0) {
 }
 
 async function setConfig(w, h) {
-  const r = await api("POST", "/config", { width: w, height: h });
-  if (r?.ok) toast("Resolution: " + w + "\u00d7" + h);
+  await api("POST", "/config", { width: w, height: h });
 }
 
 async function setEye(mode) {
-  const r = await api("POST", "/eye", { mode });
-  if (r?.ok) toast("Eye mode: " + mode);
+  await api("POST", "/eye", { mode });
 }
 
 async function sendHome() {
-  const r = await api("POST", "/home");
-  if (r?.ok) toast("Home");
+  await api("POST", "/home");
 }
 
 async function stopCast() {
   if (!confirm("Stop casting session?")) return;
   await api("POST", "/stop");
-  toast("Casting stopped");
-  updateSessionButton();
 }
 
 async function restartCast() {
   await api("POST", "/restart");
-  toast("Restarting cast…");
-  updateSessionButton();
 }
 
 function updateSessionButton() {
@@ -147,8 +162,6 @@ async function sendClick() {
 async function togglePoseLoop() {
   await api("POST", "/pose-loop", { active: false });
   await api("POST", "/reset-view");
-  toast("View reset");
-  updatePoseLoopUI(false);
   $("#yaw-slider").value = 0;
   $("#pitch-slider").value = 0;
   $("#yaw-val").textContent = "0";
