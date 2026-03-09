@@ -23,6 +23,7 @@ import {
   VIDEO_META_MARKER,
   MGIK_MAGIC,
   CAST_PORT,
+  QUEST_CAST_PORT,
   CMD_SHORT_ACK_65,
   CMD_SHORT_ACK_CD,
   CMD_SHORT_ACK_12D,
@@ -225,18 +226,26 @@ export class CastSession extends EventEmitter {
     await execCommand("adb", ["connect", device]);
     await execCommand("adb", [
       "-s", device, "shell",
-      "setprop debug.oculus.command_line_media_capture Casting",
+      "setprop debug.oculus.command_line_media_capture true",
     ]);
-    // Tell Quest which port to connect to
+    // Tell Quest to connect on port 4446 (matching MQDH convention)
     await execCommand("adb", [
       "-s", device, "shell",
-      `setprop debug.oculus.magic.port ${this.listenPort}`,
+      `setprop debug.oculus.magic.port ${QUEST_CAST_PORT}`,
     ]);
+    // Set up reverse mappings for both ports (matching MQDH)
     verbose("Setting up ADB reverse port forward...");
-    await execCommand("adb", [
-      "-s", device, "reverse",
-      `tcp:${this.listenPort}`, `tcp:${this.listenPort}`,
-    ]);
+    for (const port of [CAST_PORT, QUEST_CAST_PORT]) {
+      try {
+        await execCommand("adb", ["-s", device, "reverse", "--remove", `tcp:${port}`]);
+      } catch {
+        // No existing mapping — that's fine
+      }
+      await execCommand("adb", [
+        "-s", device, "reverse",
+        `tcp:${port}`, `tcp:${this.listenPort}`,
+      ]);
+    }
   }
 
   async startCastService(questIp: string): Promise<void> {

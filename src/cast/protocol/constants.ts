@@ -56,8 +56,9 @@ export const LAYER_TYPE_NAMES: Record<number, string> = {
   [LAYER_VOLUMETRIC_WINDOW]: "VOLUMETRIC_WINDOW",
 };
 
-// Default cast TCP port — Quest reads debug.oculus.magic.port to know where to connect
+// Cast TCP ports — MQDH uses 4446 for debug.oculus.magic.port, maps both 4445 and 4446
 export const CAST_PORT = 4445;
+export const QUEST_CAST_PORT = 4446;
 
 // Keepalive ack value progression
 export const KEEPALIVE_INITIAL_ACK = 0xc8;
