@@ -169,8 +169,12 @@ export async function castCommand(options: CastCommandOptions): Promise<void> {
   // Create cast session
   const session = new CastSession({ listenPort, width, height });
 
-  // Start: ADB setup, TCP listen, then trigger cast service, wait for connections
+  // Bind TCP first (auto-increments port on EADDRINUSE), then ADB setup, then wait for Quest
   try {
+    await session.bind();
+    if (session.listenPort !== listenPort) {
+      console.log(`Port ${listenPort} in use, listening on ${session.listenPort}`);
+    }
     await session.adbSetup(questIp);
     await session.start(questIp);
     console.log("Quest connected, casting active");

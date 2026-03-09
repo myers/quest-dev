@@ -23,7 +23,6 @@ import {
   VIDEO_META_MARKER,
   MGIK_MAGIC,
   CAST_PORT,
-  QUEST_CAST_PORT,
   CMD_SHORT_ACK_65,
   CMD_SHORT_ACK_CD,
   CMD_SHORT_ACK_12D,
@@ -62,7 +61,7 @@ export interface CastSessionOptions {
 
 export class CastSession extends EventEmitter {
   // Configuration
-  readonly listenPort: number;
+  private _listenPort: number;
 
   // Connection state
   private _connected = false;
@@ -103,7 +102,7 @@ export class CastSession extends EventEmitter {
 
   constructor(options: CastSessionOptions = {}) {
     super();
-    this.listenPort = options.listenPort ?? CAST_PORT;
+    this._listenPort = options.listenPort ?? CAST_PORT;
     this._width = options.width ?? 2064;
     this._height = options.height ?? 1162;
     this.sessionUuid = randomUUID();
@@ -118,6 +117,7 @@ export class CastSession extends EventEmitter {
 
   // --- Public getters ---
 
+  get listenPort(): number { return this._listenPort; }
   get connected(): boolean { return this._connected; }
   get running(): boolean { return this._running; }
   get frameCount(): number { return this._frameCount; }
@@ -137,13 +137,41 @@ export class CastSession extends EventEmitter {
 
   // --- Lifecycle ---
 
-  async start(questIp?: string): Promise<void> {
+  /** Bind the TCP server, trying successive ports on EADDRINUSE. */
+  async bind(): Promise<void> {
     FrameDecoder.checkFfmpeg();
+
+    const maxAttempts = 10;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        await this.tryBind(this._listenPort);
+        verbose(`TCP server listening on port ${this._listenPort}`);
+        return;
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code === "EADDRINUSE") {
+          verbose(`Port ${this._listenPort} in use, trying ${this._listenPort + 1}`);
+          this._listenPort++;
+        } else {
+          throw err;
+        }
+      }
+    }
+    throw new Error(`No available port found (tried ${maxAttempts} ports)`);
+  }
+
+  private tryBind(port: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.server = createServer();
+      this.server.listen(port, "0.0.0.0", () => resolve());
+      this.server.on("error", reject);
+    });
+  }
+
+  async start(questIp?: string): Promise<void> {
     this._running = true;
     this.startTime = Date.now();
 
-    verbose("Starting TCP server on port", this.listenPort);
-    await this.listenForConnections(questIp);
+    await this.waitForConnections(questIp);
   }
 
   async stop(): Promise<void> {
@@ -199,10 +227,15 @@ export class CastSession extends EventEmitter {
       "-s", device, "shell",
       "setprop debug.oculus.command_line_media_capture Casting",
     ]);
+    // Tell Quest which port to connect to
+    await execCommand("adb", [
+      "-s", device, "shell",
+      `setprop debug.oculus.magic.port ${this.listenPort}`,
+    ]);
     verbose("Setting up ADB reverse port forward...");
     await execCommand("adb", [
       "-s", device, "reverse",
-      `tcp:${QUEST_CAST_PORT}`, `tcp:${this.listenPort}`,
+      `tcp:${this.listenPort}`, `tcp:${this.listenPort}`,
     ]);
   }
 
@@ -222,12 +255,17 @@ export class CastSession extends EventEmitter {
 
   // --- TCP ---
 
-  private listenForConnections(questIp?: string): Promise<void> {
+  private waitForConnections(questIp?: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (!this.server) {
+        reject(new Error("TCP server not bound — call bind() first"));
+        return;
+      }
+
       const connections: Socket[] = [];
       let resolved = false;
 
-      this.server = createServer((socket) => {
+      this.server.on("connection", (socket: Socket) => {
         const idx = connections.length + 1;
         verbose(`Connection #${idx} from ${socket.remoteAddress}`);
         connections.push(socket);
@@ -246,20 +284,15 @@ export class CastSession extends EventEmitter {
         }
       });
 
-      this.server.listen(this.listenPort, "0.0.0.0", async () => {
-        verbose(`TCP server listening on port ${this.listenPort}`);
-        // Now that we're listening, trigger the cast service so Quest connects to us
-        if (questIp) {
-          try {
-            await this.startCastService(questIp);
-          } catch (err) {
-            if (!resolved) {
-              resolved = true;
-              reject(err);
-            }
+      // Trigger the cast service now that we're listening
+      if (questIp) {
+        this.startCastService(questIp).catch((err) => {
+          if (!resolved) {
+            resolved = true;
+            reject(err);
           }
-        }
-      });
+        });
+      }
 
       // Timeout after 15 seconds
       const timeout = setTimeout(() => {

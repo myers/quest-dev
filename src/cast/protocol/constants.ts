@@ -56,9 +56,8 @@ export const LAYER_TYPE_NAMES: Record<number, string> = {
   [LAYER_VOLUMETRIC_WINDOW]: "VOLUMETRIC_WINDOW",
 };
 
-// Default cast TCP port (host listens on 4445, Quest connects to 4446)
+// Default cast TCP port — Quest reads debug.oculus.magic.port to know where to connect
 export const CAST_PORT = 4445;
-export const QUEST_CAST_PORT = 4446;
 
 // Keepalive ack value progression
 export const KEEPALIVE_INITIAL_ACK = 0xc8;
