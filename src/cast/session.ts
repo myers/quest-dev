@@ -93,6 +93,8 @@ export class CastSession extends EventEmitter {
 
   // Pose
   private _pose: PoseState;
+  private _poseLoopTimer: ReturnType<typeof setInterval> | null = null;
+  private _poseLoopActive = false;
 
   // Input forwarding
   private inputForwardingStarted = false;
@@ -126,6 +128,8 @@ export class CastSession extends EventEmitter {
   get layers(): Map<number, LayerInfo> { return this._layers; }
   get layerId(): number { return this._layerId; }
 
+  get poseLoopActive(): boolean { return this._poseLoopActive; }
+
   get fps(): number {
     const elapsed = this.startTime > 0 ? (Date.now() - this.startTime) / 1000 : 0;
     return elapsed > 0 ? Math.round((this._frameCount / elapsed) * 10) / 10 : 0;
@@ -153,6 +157,7 @@ export class CastSession extends EventEmitter {
       }
     }
 
+    this.stopPoseLoop();
     this.decoder.stop();
     this.controlSocket?.destroy();
     this.videoSocket?.destroy();
@@ -501,6 +506,10 @@ export class CastSession extends EventEmitter {
     if (this._connected && this.subMagic) {
       this.sendXrsp(buildPose(this.subMagic, this.nextSeq(), this._pose));
     }
+    // Auto-start periodic pose loop on first pose send
+    if (!this._poseLoopActive) {
+      this.startPoseLoop();
+    }
   }
 
   applyPoseDelta(delta: PoseDelta): void {
@@ -511,6 +520,31 @@ export class CastSession extends EventEmitter {
   setPoseAbsolute(abs: PoseAbsolute): void {
     this._pose = setPoseAbsolute(this._pose, abs);
     this.sendPose(this._pose);
+  }
+
+  /** Start periodic pose refresh at ~27 Hz (matching MQDH cadence). */
+  startPoseLoop(): void {
+    if (this._poseLoopActive) return;
+    this._poseLoopActive = true;
+    verbose("Pose loop started (~27 Hz)");
+    this._poseLoopTimer = setInterval(() => {
+      if (this._connected && this.subMagic) {
+        this.sendXrsp(buildPose(this.subMagic, this.nextSeq(), this._pose));
+      }
+    }, 37);
+    this.emit("pose-loop", true);
+  }
+
+  /** Stop periodic pose refresh. */
+  stopPoseLoop(): void {
+    if (!this._poseLoopActive) return;
+    this._poseLoopActive = false;
+    if (this._poseLoopTimer) {
+      clearInterval(this._poseLoopTimer);
+      this._poseLoopTimer = null;
+    }
+    verbose("Pose loop stopped");
+    this.emit("pose-loop", false);
   }
 
   sendDisplayConfig(width: number, height: number, eye?: number): void {

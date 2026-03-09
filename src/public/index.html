@@ -101,11 +101,13 @@
       <div id="pose-display" style="font-size:11px; font-family:monospace; line-height:1.6; color:var(--dim);">
         <div>pos: <span class="val" id="p-xyz">0, 0, 0</span></div>
         <div>rot: <span class="val" id="p-yp">0, 0</span></div>
+        <div>loop: <span class="val" id="p-loop">off</span></div>
       </div>
       <div class="btn-row" style="margin-top:8px;">
         <button onclick="resetPose()" class="secondary" style="flex:1;">Reset Pose</button>
         <button onclick="goHome()" class="secondary" style="flex:1;">Home (0,0,0)</button>
       </div>
+      <button id="pose-loop-btn" onclick="togglePoseLoop()" class="secondary" style="width:100%; margin-top:6px;" disabled>Reset View</button>
     </div>
 
     <div class="panel">

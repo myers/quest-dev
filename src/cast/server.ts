@@ -94,6 +94,7 @@ export async function createCastServer(
       fps: session.fps,
       elapsed: session.running ? Math.round((Date.now() - Date.now()) / 100) / 10 : 0,
       has_frame: session.getScreenshot() !== null,
+      pose_loop: session.poseLoopActive,
       pose: {
         x: round4(session.pose.x),
         y: round4(session.pose.y),
@@ -239,6 +240,16 @@ export async function createCastServer(
       return { error: `unknown action: ${action}` };
     },
   );
+
+  app.post<{ Body: { active?: boolean } }>("/pose-loop", async (req) => {
+    const active = req.body?.active ?? !session.poseLoopActive;
+    if (active) {
+      session.startPoseLoop();
+    } else {
+      session.stopPoseLoop();
+    }
+    return { ok: true, pose_loop: session.poseLoopActive };
+  });
 
   app.post("/stop", async () => {
     if (!session.connected) return { error: "not connected" };

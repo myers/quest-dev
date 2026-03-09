@@ -41,6 +41,7 @@ async function pollStatus() {
         s.pose.pitch_deg.toFixed(1) +
         "\u00b0 pitch";
     }
+    updatePoseLoopUI(s.pose_loop);
   } catch {}
 }
 setInterval(pollStatus, 1000);
@@ -141,6 +142,24 @@ function openStream() {
 async function sendClick() {
   const r = await api("POST", "/click");
   if (r?.ok) toast("Click sent");
+}
+
+async function togglePoseLoop() {
+  await api("POST", "/pose-loop", { active: false });
+  await api("POST", "/reset-view");
+  toast("View reset");
+  updatePoseLoopUI(false);
+  $("#yaw-slider").value = 0;
+  $("#pitch-slider").value = 0;
+  $("#yaw-val").textContent = "0";
+  $("#pitch-val").textContent = "0";
+}
+
+function updatePoseLoopUI(active) {
+  const btn = $("#pose-loop-btn");
+  const label = $("#p-loop");
+  btn.disabled = !active;
+  if (label) label.textContent = active ? "~27 Hz" : "off";
 }
 
 async function resetPose() {
