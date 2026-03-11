@@ -50,7 +50,9 @@ export async function stayAwakeDisable(cliPin?: string): Promise<void> {
   checkADBPath();
   const pin = loadPin(cliPin);
   await setTestProperties(pin, false);
-  console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
+  const props = await getTestProperties();
+  console.log('Test mode disabled:');
+  console.log(formatTestProperties(props));
 }
 
 /**

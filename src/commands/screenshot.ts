@@ -8,6 +8,7 @@ import { existsSync, statSync } from 'fs';
 import { checkADBPath, checkADBDevices, checkUSBFileTransfer, checkQuestAwake } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
 import { generateScreenshotFilename } from '../utils/filename.js';
+import { addJpegFileComment } from '../utils/jpeg-comment.js';
 
 /**
  * Validate directory exists and is writable
@@ -133,11 +134,9 @@ async function deleteRemoteScreenshot(filename: string): Promise<void> {
 /**
  * Add caption to JPEG COM metadata
  */
-async function addJpegMetadata(filePath: string, caption: string): Promise<boolean> {
+function addJpegMetadata(filePath: string, caption: string): boolean {
   try {
-    const { exiftool } = await import('exiftool-vendored');
-    await exiftool.write(filePath, { Comment: caption });
-    await exiftool.end();
+    addJpegFileComment(filePath, caption);
     console.log(`Caption added: "${caption}"`);
     return true;
   } catch (error) {
@@ -158,7 +157,7 @@ export async function screenshotCommand(directoryPath: string, caption: string |
   validateDirectory(resolvedDir);
 
   // Generate filename
-  const localFilename = generateScreenshotFilename();
+  const localFilename = generateScreenshotFilename(new Date(), caption);
   const outputPath = join(resolvedDir, localFilename);
 
   // Check prerequisites
@@ -215,7 +214,7 @@ export async function screenshotCommand(directoryPath: string, caption: string |
 
   // Add metadata (non-fatal, only if caption provided)
   if (caption) {
-    await addJpegMetadata(outputPath, caption);
+    addJpegMetadata(outputPath, caption);
   }
 
   // Delete from Quest after successful pull

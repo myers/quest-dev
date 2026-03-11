@@ -198,7 +198,27 @@ cli.command(
         describe: 'Open dashboard in default browser',
         type: 'boolean',
         default: false,
-      });
+      })
+      .epilog(`REST API (served on --port, default 8080):
+
+  GET   /help          API reference (plain text)
+  GET   /screenshot    Latest frame as JPEG
+  GET   /stream        MJPEG stream
+  GET   /status        JSON session state, resolution, fps, pose
+  GET   /layers        Available layers and active layer ID
+  GET   /events        SSE stream (state changes, toasts)
+
+  POST  /config        { width, height }
+  POST  /eye           { mode: "left"|"right"|"stereo" }
+  POST  /pose          { x, y, z, yaw, pitch } or { dx, dy, dz, d_yaw, d_pitch }
+  POST  /pose-loop     { active: true|false }  (omit to toggle)
+  POST  /click         { x, y, layer, hold_ms }
+  POST  /gaze          { action: "enable"|"click", yaw, pitch, dwell_ms }
+  POST  /mud           { type, payload_hex }
+  POST  /home          Press Home button
+  POST  /reset-view    Reset camera pose, stop pose loop
+  POST  /restart       Restart cast session
+  POST  /stop          Stop casting`);
   },
   async (argv) => {
     await castCommand({

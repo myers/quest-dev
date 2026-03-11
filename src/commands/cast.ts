@@ -202,6 +202,7 @@ export async function castCommand(options: CastCommandOptions): Promise<void> {
     console.log(`Screenshot:  http://localhost:${port}/screenshot`);
     console.log(`MJPEG:       http://localhost:${port}/stream`);
     console.log(`Status:      http://localhost:${port}/status`);
+    console.log(`API help:    http://localhost:${port}/help`);
 
     if (options.open) {
       const openCmd = process.platform === "darwin" ? "open"

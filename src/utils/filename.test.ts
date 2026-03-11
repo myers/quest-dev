@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateScreenshotFilename } from './filename.js';
+import { generateScreenshotFilename, slugifyCaption } from './filename.js';
 
 describe('generateScreenshotFilename', () => {
   it('formats UTC timestamp correctly', () => {
@@ -22,6 +22,24 @@ describe('generateScreenshotFilename', () => {
     const date = new Date('2026-12-31T00:00:00Z');
     expect(generateScreenshotFilename(date))
       .toBe('screenshot-2026-12-31-00-00-00-Z.jpg');
+  });
+
+  it('includes slugified caption in filename', () => {
+    const date = new Date('2026-01-15T14:30:45Z');
+    expect(generateScreenshotFilename(date, 'Main Menu Screenshot'))
+      .toBe('screenshot-2026-01-15-14-30-45-Z-main-menu-screenshot.jpg');
+  });
+
+  it('truncates long captions to 25 chars', () => {
+    const date = new Date('2026-01-15T14:30:45Z');
+    expect(generateScreenshotFilename(date, 'This is a very long caption that should be truncated'))
+      .toBe('screenshot-2026-01-15-14-30-45-Z-this-is-a-very-long-capti.jpg');
+  });
+
+  it('omits slug when no caption provided', () => {
+    const date = new Date('2026-01-15T14:30:45Z');
+    expect(generateScreenshotFilename(date))
+      .toBe('screenshot-2026-01-15-14-30-45-Z.jpg');
   });
 
   it('generates filename with current time when no date provided', () => {
@@ -51,5 +69,27 @@ describe('generateScreenshotFilename', () => {
       expect(diff).toBeGreaterThanOrEqual(0);
       expect(diff).toBeLessThan(60000); // Within last 60 seconds
     }
+  });
+});
+
+describe('slugifyCaption', () => {
+  it('lowercases and replaces spaces with dashes', () => {
+    expect(slugifyCaption('Main Menu')).toBe('main-menu');
+  });
+
+  it('replaces non-alphanumeric with dashes', () => {
+    expect(slugifyCaption('Hello, World! #1')).toBe('hello-world-1');
+  });
+
+  it('collapses consecutive dashes', () => {
+    expect(slugifyCaption('foo---bar')).toBe('foo-bar');
+  });
+
+  it('trims leading and trailing dashes', () => {
+    expect(slugifyCaption('--hello--')).toBe('hello');
+  });
+
+  it('truncates to 25 chars without trailing dash', () => {
+    expect(slugifyCaption('this is a very long caption that exceeds')).toBe('this-is-a-very-long-capti');
   });
 });

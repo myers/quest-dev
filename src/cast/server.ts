@@ -85,6 +85,46 @@ export async function createCastServer(
 
   // --- GET endpoints ---
 
+  app.get("/help", async (_req, reply) => {
+    const help = `quest-dev cast — REST API
+
+GET endpoints
+  /help                 This help screen
+  /screenshot           Latest frame as JPEG (503 if no frame)
+  /stream               MJPEG stream (multipart/x-mixed-replace)
+  /status               JSON: connected, running, resolution, fps, frame_count, pose
+  /layers               JSON: available layers and active layer ID
+  /events               SSE stream: state changes and toast notifications
+
+POST endpoints (JSON body)
+  /config               Set resolution
+                          { width: 2064, height: 1162 }
+  /eye                  Set eye mode
+                          { mode: "left" | "right" | "stereo" }
+  /pose                 Set or nudge camera pose
+                          Absolute: { x, y, z, yaw, pitch }
+                          Delta:    { dx, dy, dz, d_yaw, d_pitch }
+  /pose-loop            Toggle periodic pose refresh (~27 Hz)
+                          { active: true | false }   (omit to toggle)
+  /rotate               Rotate camera (deprecated, use /pose)
+                          { pitch, yaw }
+  /move                 Move + rotate (deprecated, use /pose)
+                          { forward, strafe, yaw, pitch }
+  /click                Tap at normalised screen coordinates
+                          { x: 0.5, y: 0.5, layer, hold_ms: 50 }
+  /gaze                 Gaze-based interaction
+                          { action: "enable" }
+                          { action: "click", yaw, pitch, dwell_ms: 1200 }
+  /mud                  Send raw MUD payload
+                          { type: 0, payload_hex: "..." }
+  /home                 Press the Home button (ADB keyevent)
+  /reset-view           Reset camera to default pose, stop pose loop
+  /restart              Restart the cast session
+  /stop                 Stop casting
+`;
+    return reply.type("text/plain").send(help);
+  });
+
   app.get("/screenshot", async (_req, reply) => {
     const jpeg = session.getScreenshot();
     if (jpeg) {
