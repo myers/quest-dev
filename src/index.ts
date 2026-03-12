@@ -363,11 +363,15 @@ cli.command(
       package: string;
       crashed: boolean;
       logcatLines?: string[];
+      logcatFile?: string;
       error?: string;
     };
 
     if (result.ok) {
       console.log(`\nDeploy successful: ${result.package} is running`);
+      if (result.logcatFile) {
+        console.log(`Logcat: ${result.logcatFile}`);
+      }
     } else if (result.crashed) {
       console.error(`\nCRASH DETECTED: ${result.package}`);
       if (result.logcatLines && result.logcatLines.length > 0) {
@@ -380,9 +384,15 @@ cli.command(
       if (result.error) {
         console.error(result.error);
       }
+      if (result.logcatFile) {
+        console.error(`Logcat: ${result.logcatFile}`);
+      }
       process.exit(1);
     } else {
       console.error(`\nDeploy failed: ${result.error}`);
+      if (result.logcatFile) {
+        console.error(`Logcat: ${result.logcatFile}`);
+      }
       process.exit(1);
     }
   }

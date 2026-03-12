@@ -21,6 +21,7 @@ export interface DeployResult {
   package: string;
   crashed: boolean;
   logcatLines?: string[];
+  logcatFile?: string;
   error?: string;
 }
 
@@ -119,6 +120,7 @@ export async function deploy(
 
   // Start logcat capture (clears buffer first)
   await logcat.start();
+  const logcatFile = logcat.status().file ?? undefined;
 
   // Launch app
   console.log("Launching app...");
@@ -139,6 +141,7 @@ export async function deploy(
       ok: false,
       package: packageName,
       crashed: false,
+      logcatFile,
       error: `Launch failed: ${(error as Error).message}`,
     };
   }
@@ -157,6 +160,7 @@ export async function deploy(
       package: packageName,
       crashed: true,
       logcatLines: lines,
+      logcatFile,
     };
   }
 
@@ -176,10 +180,11 @@ export async function deploy(
       package: packageName,
       crashed: true,
       logcatLines: tail,
+      logcatFile,
       error: "Process exited (no crash pattern detected but process not running)",
     };
   }
 
   console.log(`Deploy successful: ${packageName} is running`);
-  return { ok: true, package: packageName, crashed: false };
+  return { ok: true, package: packageName, crashed: false, logcatFile };
 }
