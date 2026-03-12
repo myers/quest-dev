@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@fastify/static": "^9.0.0",
+    "adbkit-apkreader": "^3.2.0",
     "fastify": "^5.8.2",
     "which": "^4.0.0",
     "yargs": "^18.0.0"
