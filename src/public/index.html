@@ -11,11 +11,15 @@
 <header>
   <div id="status-dot"></div>
   <h1>Quest Cast</h1>
-  <div id="status-bar">
+  <div id="header-cast-btn">
+    <button onclick="startCast()">Cast</button>
+  </div>
+  <div id="status-bar" style="display:none;">
     <span><span class="val" id="s-fps">--</span> fps</span>
     <span><span class="val" id="s-res">--</span></span>
     <span><span class="val" id="s-frames">--</span> frames</span>
     <span><span class="val" id="s-bw">--</span> MB</span>
+    <button id="header-stop-btn" onclick="stopCast()">Stop</button>
   </div>
 </header>
 
@@ -28,7 +32,7 @@
 
   <div class="sidebar">
     <div class="panel">
-      <h2>Movement (WASD / Arrow Keys)</h2>
+      <h2>Movement</h2>
       <div class="btn-row" style="justify-content:center;">
         <div style="display:grid; grid-template-columns: repeat(3,40px); grid-template-rows: repeat(2,34px); gap:4px;">
           <div></div>
@@ -39,101 +43,60 @@
           <button id="btn-right" class="secondary" title="D / Right">&#9654;</button>
         </div>
       </div>
-      <div class="speed-control">
-        <label>Speed:</label>
+      <div class="speed-row">
+        <label>Speed</label>
         <input type="number" id="move-speed" value="0.3" min="0.01" max="2" step="0.05">
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Look (drag on video or IJKL)</h2>
-      <div class="control-row">
-        <label>Yaw</label>
-        <input type="range" id="yaw-slider" min="-1" max="1" step="0.01" value="0">
-        <span class="val-display" id="yaw-val">0</span>
-      </div>
-      <div class="control-row">
-        <label>Pitch</label>
-        <input type="range" id="pitch-slider" min="-1" max="1" step="0.01" value="0">
-        <span class="val-display" id="pitch-val">0</span>
-      </div>
-      <div class="speed-control">
-        <label>Sensitivity:</label>
+        <label>Look</label>
         <input type="number" id="look-speed" value="0.15" min="0.01" max="1" step="0.01">
       </div>
     </div>
 
     <div class="panel">
-      <h2>Device</h2>
-      <button onclick="sendHome()" style="width:100%;">Home</button>
-    </div>
-
-    <div class="panel">
-      <h2>Resolution</h2>
-      <div class="preset-grid">
-        <button onclick="setConfig(2064,1162)">2064x1162</button>
-        <button onclick="setConfig(1920,1080)" class="secondary">1920x1080</button>
-        <button onclick="setConfig(1280,720)" class="secondary">1280x720</button>
+      <h2>Pose</h2>
+      <div class="pose-readout">
+        <span id="p-xyz">0, 0, 0</span>
+        <span id="p-yp">0&deg; yaw, 0&deg; pitch</span>
+        <span>loop: <span id="p-loop">off</span></span>
+      </div>
+      <div class="btn-row">
+        <button onclick="resetPose()" class="secondary" style="flex:1;">Reset</button>
+        <button onclick="goHome()" class="secondary" style="flex:1;">Origin</button>
+        <button id="pose-loop-btn" onclick="togglePoseLoop()" class="secondary" style="flex:1;" disabled>Stop Loop</button>
       </div>
     </div>
 
     <div class="panel">
-      <h2>Eye</h2>
+      <h2>Display</h2>
       <div class="btn-row">
-        <button onclick="setEye('left')">Left</button>
-        <button onclick="setEye('right')" class="secondary">Right</button>
+        <button onclick="setConfig(2064,1162)">2064</button>
+        <button onclick="setConfig(1920,1080)" class="secondary">1080p</button>
+        <button onclick="setConfig(1280,720)" class="secondary">720p</button>
+      </div>
+      <div class="btn-row" style="margin-top:6px;">
+        <button onclick="setEye('left')">L Eye</button>
+        <button onclick="setEye('right')" class="secondary">R Eye</button>
         <button onclick="setEye('stereo')" class="secondary">Stereo</button>
       </div>
     </div>
 
     <div class="panel">
-      <h2>Interact</h2>
+      <h2>Actions</h2>
       <div class="btn-row">
-        <button onclick="sendClick()" style="flex:1;">Click at gaze center</button>
+        <button onclick="sendClick()" style="flex:1;">Click</button>
+        <button onclick="sendHome()" class="secondary" style="flex:1;">Home</button>
       </div>
+      <div class="btn-row" style="margin-top:6px;">
+        <button onclick="saveScreenshot()" style="flex:1;">Screenshot</button>
+        <button onclick="openStream()" class="secondary" style="flex:1;">MJPEG</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Keys</h2>
       <div class="keybind-hint">
-        <b>Space</b> or <b>Enter</b> &mdash; click &nbsp; <b>Right-click</b> on video &mdash; click
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Pose</h2>
-      <div id="pose-display" style="font-size:11px; font-family:monospace; line-height:1.6; color:var(--dim);">
-        <div>pos: <span class="val" id="p-xyz">0, 0, 0</span></div>
-        <div>rot: <span class="val" id="p-yp">0, 0</span></div>
-        <div>loop: <span class="val" id="p-loop">off</span></div>
-      </div>
-      <div class="btn-row" style="margin-top:8px;">
-        <button onclick="resetPose()" class="secondary" style="flex:1;">Reset Pose</button>
-        <button onclick="goHome()" class="secondary" style="flex:1;">Home (0,0,0)</button>
-      </div>
-      <button id="pose-loop-btn" onclick="togglePoseLoop()" class="secondary" style="width:100%; margin-top:6px;" disabled>Reset View</button>
-    </div>
-
-    <div class="panel">
-      <h2>Capture</h2>
-      <div class="btn-row">
-        <button onclick="saveScreenshot()">Save Screenshot</button>
-        <button onclick="openStream()" class="secondary">MJPEG Stream</button>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Session</h2>
-      <button id="session-btn" onclick="stopCast()" class="danger" style="width:100%;">Stop Casting</button>
-    </div>
-
-    <div class="panel">
-      <h2>Keyboard Shortcuts</h2>
-      <div class="keybind-hint">
-        <b>WASD</b> / <b>Arrows</b> &mdash; move<br>
-        <b>IJKL</b> &mdash; look (pitch/yaw)<br>
-        <b>QE</b> &mdash; up/down<br>
-        <b>Space</b> / <b>Enter</b> &mdash; click at gaze<br>
-        <b>Click+drag</b> on video &mdash; free look<br>
-        <b>Right-click</b> on video &mdash; click at gaze<br>
-        <b>P</b> &mdash; save screenshot<br>
-        <b>Esc</b> &mdash; reset pose
+        <b>WASD</b> / <b>Arrows</b> move &nbsp; <b>IJKL</b> look &nbsp; <b>QE</b> up/down<br>
+        <b>Drag</b> on video: free look &nbsp; <b>Right-click</b>: click<br>
+        <b>Space</b> click &nbsp; <b>P</b> screenshot &nbsp; <b>Esc</b> reset
       </div>
     </div>
   </div>

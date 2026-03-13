@@ -11,6 +11,7 @@ import { loadConfig } from "../utils/config.js";
 import { verbose } from "../utils/verbose.js";
 import { StayAwakeManager } from "./stay-awake-manager.js";
 import { LogcatManager } from "./logcat-manager.js";
+import { CastManager } from "./cast-manager.js";
 import { createDaemonServer } from "./server.js";
 
 export const DAEMON_DIR = join(homedir(), ".local", "share", "quest-dev");
@@ -29,6 +30,7 @@ export async function startDaemon(port: number): Promise<void> {
 
   const stayAwake = new StayAwakeManager();
   const logcat = new LogcatManager();
+  const castManager = new CastManager();
 
   // Idle timer
   let idleHandle: NodeJS.Timeout | null = null;
@@ -78,6 +80,9 @@ export async function startDaemon(port: number): Promise<void> {
     if (idleHandle) clearTimeout(idleHandle);
     if (batteryInterval) clearInterval(batteryInterval as NodeJS.Timeout);
 
+    // Stop cast
+    castManager.cleanup();
+
     // Restore stay-awake
     stayAwake.cleanupSync();
 
@@ -100,11 +105,19 @@ export async function startDaemon(port: number): Promise<void> {
   process.on("SIGTERM", shutdown);
   process.on("SIGHUP", shutdown);
 
+  // SIGUSR1 resets idle timer (used by Claude Code hooks)
+  process.on("SIGUSR1", () => {
+    const now = new Date().toLocaleTimeString();
+    console.log(`[${now}] Activity detected, resetting idle timer`);
+    resetIdleTimer();
+  });
+
   // Start server
   const server = await createDaemonServer({
     port,
     stayAwake,
     logcat,
+    castManager,
     onActivity: resetIdleTimer,
     onShutdown: () => shutdown(),
   });

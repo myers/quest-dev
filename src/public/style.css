@@ -16,10 +16,12 @@ header {
   flex-shrink: 0;
 }
 header h1 { font-size: 16px; font-weight: 600; }
+#header-cast-btn { margin-left: auto; }
 #status-bar {
-  display: flex; gap: 16px; margin-left: auto; font-size: 12px; color: var(--dim);
+  display: flex; align-items: center; gap: 16px; margin-left: auto; font-size: 12px; color: var(--dim);
 }
 #status-bar .val { color: var(--text); font-variant-numeric: tabular-nums; }
+#header-stop-btn { margin-left: 8px; padding: 4px 14px; font-size: 12px; }
 #status-dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--red);
   align-self: center;
@@ -47,40 +49,42 @@ header h1 { font-size: 16px; font-weight: 600; }
 #crosshair::before { width: 1px; height: 8px; top: 50%; left: 50%; transform: translate(-50%,-50%); }
 #crosshair::after { width: 8px; height: 1px; top: 50%; left: 50%; transform: translate(-50%,-50%); }
 .sidebar {
-  width: 280px; flex-shrink: 0; background: var(--surface);
+  width: 260px; flex-shrink: 0; background: var(--surface);
   border-left: 1px solid var(--border); display: flex; flex-direction: column;
   overflow-y: auto;
 }
-.panel { padding: 12px; border-bottom: 1px solid var(--border); }
+.panel { padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .panel h2 {
-  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--dim); margin-bottom: 8px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--dim); margin-bottom: 6px;
 }
-.control-row {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
-}
-.control-row label { font-size: 12px; width: 52px; flex-shrink: 0; color: var(--dim); }
-.control-row input[type=range] { flex: 1; accent-color: var(--accent); }
-.control-row .val-display {
-  font-size: 11px; width: 40px; text-align: right; font-variant-numeric: tabular-nums;
-}
-button, .btn {
+button {
   background: var(--accent); color: #fff; border: none; border-radius: 6px;
-  padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 500;
+  padding: 5px 10px; font-size: 11px; cursor: pointer; font-weight: 500;
   transition: opacity .15s;
 }
 button:hover { opacity: .85; }
 button:active { opacity: .7; }
 button.secondary { background: var(--border); }
 button.danger { background: var(--red); }
-.btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
-.preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-select {
-  background: var(--bg); color: var(--text); border: 1px solid var(--border);
-  border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 100%;
+.btn-row { display: flex; gap: 4px; }
+.speed-row {
+  display: flex; align-items: center; gap: 6px; margin-top: 6px;
+  font-size: 10px; color: var(--dim);
 }
+.speed-row input {
+  width: 44px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px;
+  font-size: 10px; text-align: center;
+}
+.pose-readout {
+  font-size: 10px; font-family: monospace; line-height: 1.5; color: var(--dim);
+  margin-bottom: 6px;
+}
+.pose-readout span { display: block; }
+.pose-readout .val { color: var(--text); }
 .keybind-hint {
-  font-size: 10px; color: var(--dim); margin-top: 6px; line-height: 1.5;
+  font-size: 10px; color: var(--dim); line-height: 1.6;
 }
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -93,8 +97,3 @@ select {
   position: absolute; inset: 0; cursor: grab; z-index: 2;
 }
 #drag-overlay:active { cursor: grabbing; }
-.speed-control { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-.speed-control label { font-size: 11px; color: var(--dim); }
-.speed-control input { width: 50px; background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px;
-  font-size: 11px; text-align: center; }

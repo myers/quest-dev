@@ -17,7 +17,7 @@ function toast(msg) {
 
 // --- SSE for state broadcasts ---
 function connectSSE() {
-  const es = new EventSource("/events");
+  const es = new EventSource("/cast/events");
   es.addEventListener("state", (e) => {
     const s = JSON.parse(e.data);
     if ("connected" in s || "running" in s) {
@@ -25,7 +25,7 @@ function connectSSE() {
       if ("connected" in s) connected = s.connected && (s.running ?? connected);
       if ("running" in s) connected = (s.connected ?? connected) && s.running;
       $("#status-dot").className = connected ? "ok" : "";
-      if (connected !== wasConnected) updateSessionButton();
+      if (connected !== wasConnected) updateHeader();
     }
     if ("pose_loop" in s) updatePoseLoopUI(s.pose_loop);
   });
@@ -34,18 +34,23 @@ function connectSSE() {
     toast(d.message);
   });
   es.onerror = () => {
-    // EventSource auto-reconnects; just mark disconnected
     connected = false;
     $("#status-dot").className = "";
-    updateSessionButton();
+    updateHeader();
   };
 }
 connectSSE();
 
-// --- Status polling (stats only: fps, frames, bytes, pose, resolution) ---
+// --- Header toggle ---
+function updateHeader() {
+  $("#header-cast-btn").style.display = connected ? "none" : "";
+  $("#status-bar").style.display = connected ? "flex" : "none";
+}
+
+// --- Status polling ---
 async function pollStatus() {
   try {
-    const r = await fetch("/status");
+    const r = await fetch("/cast/status");
     const s = await r.json();
     $("#s-fps").textContent = s.fps;
     $("#s-res").textContent = s.width + "\u00d7" + s.height;
@@ -53,16 +58,9 @@ async function pollStatus() {
     $("#s-bw").textContent = (s.bytes / 1048576).toFixed(1);
     if (s.pose) {
       $("#p-xyz").textContent =
-        s.pose.x.toFixed(2) +
-        ", " +
-        s.pose.y.toFixed(2) +
-        ", " +
-        s.pose.z.toFixed(2);
+        s.pose.x.toFixed(2) + ", " + s.pose.y.toFixed(2) + ", " + s.pose.z.toFixed(2);
       $("#p-yp").textContent =
-        s.pose.yaw_deg.toFixed(1) +
-        "\u00b0 yaw, " +
-        s.pose.pitch_deg.toFixed(1) +
-        "\u00b0 pitch";
+        s.pose.yaw_deg.toFixed(1) + "\u00b0 yaw, " + s.pose.pitch_deg.toFixed(1) + "\u00b0 pitch";
     }
   } catch {}
 }
@@ -75,15 +73,13 @@ function refreshFrame() {
   const next = new Image();
   const seq = ++frameSeq;
   next.onload = function () {
-    if (seq === frameSeq) {
-      img.src = next.src;
-    }
+    if (seq === frameSeq) img.src = next.src;
     requestAnimationFrame(refreshFrame);
   };
   next.onerror = function () {
     setTimeout(refreshFrame, 500);
   };
-  next.src = "/screenshot?t=" + Date.now();
+  next.src = "/cast/screenshot?t=" + Date.now();
 }
 refreshFrame();
 
@@ -102,70 +98,47 @@ async function api(method, path, body) {
   }
 }
 
-async function sendMove(forward = 0, strafe = 0, yaw = 0, pitch = 0) {
-  await api("POST", "/move", { forward, strafe, yaw, pitch });
-}
-
-async function setConfig(w, h) {
-  await api("POST", "/config", { width: w, height: h });
-}
-
-async function setEye(mode) {
-  await api("POST", "/eye", { mode });
-}
-
-async function sendHome() {
-  await api("POST", "/home");
-}
+// --- Cast actions ---
+async function startCast() { await api("POST", "/cast/start"); }
 
 async function stopCast() {
   if (!confirm("Stop casting session?")) return;
-  await api("POST", "/stop");
+  await api("POST", "/cast/stop");
 }
 
-async function restartCast() {
-  await api("POST", "/restart");
-}
+async function setConfig(w, h) { await api("POST", "/cast/config", { width: w, height: h }); }
+async function setEye(mode) { await api("POST", "/cast/eye", { mode }); }
+async function sendHome() { await api("POST", "/cast/home"); }
 
-function updateSessionButton() {
-  const btn = $("#session-btn");
-  if (!btn) return;
-  if (connected) {
-    btn.textContent = "Stop Casting";
-    btn.className = "danger";
-    btn.onclick = stopCast;
-  } else {
-    btn.textContent = "Start Casting";
-    btn.className = "";
-    btn.onclick = restartCast;
-  }
+async function sendClick() {
+  const r = await api("POST", "/cast/click");
+  if (r?.ok) toast("Click sent");
 }
 
 function saveScreenshot() {
   const a = document.createElement("a");
-  a.href = "/screenshot";
-  a.download =
-    "quest-" + new Date().toISOString().replace(/[:.]/g, "-") + ".jpg";
+  a.href = "/cast/screenshot";
+  a.download = "quest-" + new Date().toISOString().replace(/[:.]/g, "-") + ".jpg";
   a.click();
   toast("Screenshot saved");
 }
 
-function openStream() {
-  window.open("/stream", "_blank");
+function openStream() { window.open("/cast/stream", "_blank"); }
+
+// --- Pose ---
+async function resetPose() {
+  const r = await api("POST", "/cast/pose", { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 });
+  if (r?.ok) toast("Pose reset");
 }
 
-async function sendClick() {
-  const r = await api("POST", "/click");
-  if (r?.ok) toast("Click sent");
+async function goHome() {
+  const r = await api("POST", "/cast/pose", { x: 0, y: 0, z: 0 });
+  if (r?.ok) toast("Moved to origin");
 }
 
 async function togglePoseLoop() {
-  await api("POST", "/pose-loop", { active: false });
-  await api("POST", "/reset-view");
-  $("#yaw-slider").value = 0;
-  $("#pitch-slider").value = 0;
-  $("#yaw-val").textContent = "0";
-  $("#pitch-val").textContent = "0";
+  await api("POST", "/cast/pose-loop", { active: false });
+  await api("POST", "/cast/reset-view");
 }
 
 function updatePoseLoopUI(active) {
@@ -175,49 +148,18 @@ function updatePoseLoopUI(active) {
   if (label) label.textContent = active ? "~27 Hz" : "off";
 }
 
-async function resetPose() {
-  const r = await api("POST", "/pose", { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 });
-  if (r?.ok) {
-    toast("Pose reset");
-    $("#yaw-slider").value = 0;
-    $("#pitch-slider").value = 0;
-    $("#yaw-val").textContent = "0";
-    $("#pitch-val").textContent = "0";
-  }
-}
-
-async function goHome() {
-  const r = await api("POST", "/pose", { x: 0, y: 0, z: 0 });
-  if (r?.ok) toast("Moved to origin");
-}
-
 // --- Keyboard controls ---
 const keysDown = new Set();
 
 document.addEventListener("keydown", (e) => {
-  // Don't capture keys when typing in inputs
   if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-
   if (e.repeat) return;
   keysDown.add(e.key.toLowerCase());
 
-  // Prevent arrow keys and space from scrolling the page
-  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) {
-    e.preventDefault();
-  }
-
-  if (e.key === "p" || e.key === "P") {
-    saveScreenshot();
-    return;
-  }
-  if (e.key === " " || e.key === "Enter") {
-    sendClick();
-    return;
-  }
-  if (e.key === "Escape") {
-    resetPose();
-    return;
-  }
+  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)) e.preventDefault();
+  if (e.key === "p" || e.key === "P") { saveScreenshot(); return; }
+  if (e.key === " " || e.key === "Enter") { sendClick(); return; }
+  if (e.key === "Escape") { resetPose(); return; }
 });
 
 document.addEventListener("keyup", (e) => {
@@ -225,23 +167,15 @@ document.addEventListener("keyup", (e) => {
   keysDown.delete(e.key.toLowerCase());
 });
 
-// Continuous key-driven movement + look
 let keyLoopRunning = false;
 function startKeyLoop() {
   if (keyLoopRunning) return;
   keyLoopRunning = true;
   (function tick() {
-    if (keysDown.size === 0) {
-      keyLoopRunning = false;
-      return;
-    }
+    if (keysDown.size === 0) { keyLoopRunning = false; return; }
     const ms = parseFloat($("#move-speed").value) || 0.3;
     const ls = parseFloat($("#look-speed").value) || 0.15;
-    let fwd = 0,
-      strafe = 0,
-      yaw = 0,
-      pitch = 0,
-      up = 0;
+    let fwd = 0, strafe = 0, yaw = 0, pitch = 0, up = 0;
     if (keysDown.has("w") || keysDown.has("arrowup")) fwd += ms;
     if (keysDown.has("s") || keysDown.has("arrowdown")) fwd -= ms;
     if (keysDown.has("a") || keysDown.has("arrowleft")) strafe -= ms;
@@ -254,13 +188,7 @@ function startKeyLoop() {
     if (keysDown.has("k")) pitch -= ls;
 
     if (fwd || strafe || yaw || pitch || up) {
-      api("POST", "/pose", {
-        dz: fwd,
-        dx: strafe,
-        dy: up,
-        d_yaw: yaw,
-        d_pitch: pitch,
-      });
+      api("POST", "/cast/pose", { dz: fwd, dx: strafe, dy: up, d_yaw: yaw, d_pitch: pitch });
     }
     setTimeout(tick, 80);
   })();
@@ -269,26 +197,20 @@ document.addEventListener("keydown", () => startKeyLoop());
 
 // --- Arrow button clicks ---
 $("#btn-fwd").addEventListener("click", () => {
-  const ms = parseFloat($("#move-speed").value) || 0.3;
-  api("POST", "/pose", { dz: ms });
+  api("POST", "/cast/pose", { dz: parseFloat($("#move-speed").value) || 0.3 });
 });
 $("#btn-back").addEventListener("click", () => {
-  const ms = parseFloat($("#move-speed").value) || 0.3;
-  api("POST", "/pose", { dz: -ms });
+  api("POST", "/cast/pose", { dz: -(parseFloat($("#move-speed").value) || 0.3) });
 });
 $("#btn-left").addEventListener("click", () => {
-  const ms = parseFloat($("#move-speed").value) || 0.3;
-  api("POST", "/pose", { dx: -ms });
+  api("POST", "/cast/pose", { dx: -(parseFloat($("#move-speed").value) || 0.3) });
 });
 $("#btn-right").addEventListener("click", () => {
-  const ms = parseFloat($("#move-speed").value) || 0.3;
-  api("POST", "/pose", { dx: ms });
+  api("POST", "/cast/pose", { dx: parseFloat($("#move-speed").value) || 0.3 });
 });
 
 // --- Mouse drag on video for free look ---
-let dragging = false,
-  dragStartX,
-  dragStartY;
+let dragging = false, dragStartX, dragStartY;
 overlay.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   dragging = true;
@@ -305,8 +227,8 @@ window.addEventListener("mousemove", (e) => {
   dragStartY = e.clientY;
   const sens = parseFloat($("#look-speed").value) || 0.15;
   const yaw = dx * sens * 0.02;
-  const pitch = -dy * sens * 0.02;
-  if (yaw || pitch) api("POST", "/pose", { d_yaw: yaw, d_pitch: pitch });
+  const pitch = dy * sens * 0.02;
+  if (yaw || pitch) api("POST", "/cast/pose", { d_yaw: yaw, d_pitch: pitch });
 });
 
 window.addEventListener("mouseup", () => {
@@ -314,20 +236,7 @@ window.addEventListener("mouseup", () => {
   crosshair.style.display = "none";
 });
 
-// Right-click on video = click at gaze center
 overlay.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   sendClick();
-});
-
-// --- Sliders ---
-$("#yaw-slider").addEventListener("input", function () {
-  const v = parseFloat(this.value);
-  $("#yaw-val").textContent = this.value;
-  api("POST", "/pose", { d_yaw: v * 0.1 });
-});
-$("#pitch-slider").addEventListener("input", function () {
-  const v = parseFloat(this.value);
-  $("#pitch-val").textContent = this.value;
-  api("POST", "/pose", { d_pitch: v * 0.1 });
 });

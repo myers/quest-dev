@@ -6,6 +6,7 @@
 import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { DAEMON_JSON, type DaemonInfo } from "./daemon.js";
+import { loadConfig } from "../utils/config.js";
 import { verbose } from "../utils/verbose.js";
 
 const DEFAULT_PORT = 19872;
@@ -66,16 +67,24 @@ async function spawnDaemon(port: number): Promise<DaemonInfo> {
   throw new Error("Daemon failed to start (timed out waiting for daemon.json)");
 }
 
+/** Resolve daemon port from CLI flag → config → default */
+export function resolvePort(cliPort?: number): number {
+  if (cliPort) return cliPort;
+  const config = loadConfig();
+  return config.port ?? DEFAULT_PORT;
+}
+
 /** Ensure daemon is running, starting it if needed. Returns connection info. */
-export async function ensureDaemon(): Promise<DaemonInfo> {
+export async function ensureDaemon(cliPort?: number): Promise<DaemonInfo> {
   const existing = discoverDaemon();
   if (existing) {
     verbose(`Daemon already running (PID: ${existing.pid}, port: ${existing.port})`);
     return existing;
   }
 
+  const port = resolvePort(cliPort);
   console.log("Starting quest-dev daemon...");
-  return spawnDaemon(DEFAULT_PORT);
+  return spawnDaemon(port);
 }
 
 /** Make an HTTP request to the daemon */

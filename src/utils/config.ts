@@ -9,6 +9,7 @@ import { homedir } from 'os';
 
 export interface QuestDevConfig {
   pin?: string;
+  port?: number;
   idleTimeout?: number;
   lowBattery?: number;
 }
@@ -38,6 +39,7 @@ export function loadConfig(): QuestDevConfig {
     const config = tryReadConfig(path);
     if (!config) continue;
     if (merged.pin === undefined && config.pin) merged.pin = config.pin;
+    if (merged.port === undefined && config.port !== undefined) merged.port = config.port;
     if (merged.idleTimeout === undefined && config.idleTimeout !== undefined) merged.idleTimeout = config.idleTimeout;
     if (merged.lowBattery === undefined && config.lowBattery !== undefined) merged.lowBattery = config.lowBattery;
   }
@@ -60,6 +62,7 @@ export function saveConfig(values: QuestDevConfig): string {
 
   const merged = { ...existing };
   if (values.pin !== undefined) merged.pin = values.pin;
+  if (values.port !== undefined) merged.port = values.port;
   if (values.idleTimeout !== undefined) merged.idleTimeout = values.idleTimeout;
   if (values.lowBattery !== undefined) merged.lowBattery = values.lowBattery;
 

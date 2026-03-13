@@ -14,11 +14,10 @@ import { screenshotCommand } from './commands/screenshot.js';
 import { openCommand } from './commands/open.js';
 import { tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
-import { stayAwakeStatus, stayAwakeDisable, stayAwakeWatchdog } from './commands/stay-awake.js';
-import { castCommand } from './commands/cast.js';
+import { stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
 import { saveConfig, loadConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
-import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch } from './daemon/client.js';
+import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, resolvePort } from './daemon/client.js';
 import { startDaemon } from './daemon/daemon.js';
 
 // Read version from package.json
@@ -39,6 +38,11 @@ const cli = yargs(hideBin(process.argv))
     describe: 'Show detailed debug output',
     type: 'boolean',
     default: false,
+    global: true,
+  })
+  .option('port', {
+    describe: 'Daemon HTTP port (or save with: quest-dev config --port)',
+    type: 'number',
     global: true,
   })
   .fail((msg, err, yargs) => {
@@ -133,7 +137,7 @@ cli.command(
     }
 
     // Delegate to daemon
-    const info = await ensureDaemon();
+    const info = await ensureDaemon(argv.port as number | undefined);
     switch (action) {
       case 'start': {
         const result = await daemonFetch(info, '/logcat/start', {
@@ -199,82 +203,35 @@ cli.command(
   }
 );
 
-// Cast command (still runs its own server — not yet integrated with daemon)
+// Start command — starts daemon with stay-awake for web content workflows
 cli.command(
-  'cast',
-  'Cast Quest screen — streams video, serves REST API and web dashboard',
+  'start',
+  'Start quest-dev daemon (enables stay-awake, serves dashboard for casting)',
   (yargs) => {
     return yargs
-      .option('port', {
-        describe: 'HTTP server port',
-        type: 'number',
-        default: 8080,
-      })
-      .option('listen-port', {
-        describe: 'TCP listen port for Quest connections',
-        type: 'number',
-        default: 4445,
-      })
       .option('pin', {
         describe: 'Meta Store PIN for stay-awake (or save with: quest-dev config --pin)',
         type: 'string',
-      })
-      .option('idle-timeout', {
-        describe: 'Idle timeout in ms (default: 300000 = 5 min)',
-        type: 'number',
-      })
-      .option('low-battery', {
-        describe: 'Exit when battery drops to this % (default: 10)',
-        type: 'number',
-      })
-      .option('width', {
-        describe: 'Initial capture width',
-        type: 'number',
-        default: 2064,
-      })
-      .option('height', {
-        describe: 'Initial capture height',
-        type: 'number',
-        default: 1162,
-      })
-      .option('open', {
-        describe: 'Open dashboard in default browser',
-        type: 'boolean',
-        default: false,
-      })
-      .epilog(`REST API (served on --port, default 8080):
-
-  GET   /help          API reference (plain text)
-  GET   /screenshot    Latest frame as JPEG
-  GET   /stream        MJPEG stream
-  GET   /status        JSON session state, resolution, fps, pose
-  GET   /layers        Available layers and active layer ID
-  GET   /events        SSE stream (state changes, toasts)
-
-  POST  /config        { width, height }
-  POST  /eye           { mode: "left"|"right"|"stereo" }
-  POST  /pose          { x, y, z, yaw, pitch } or { dx, dy, dz, d_yaw, d_pitch }
-  POST  /pose-loop     { active: true|false }  (omit to toggle)
-  POST  /click         { x, y, layer, hold_ms }
-  POST  /gaze          { action: "enable"|"click", yaw, pitch, dwell_ms }
-  POST  /mud           { type, payload_hex }
-  POST  /home          Press Home button
-  POST  /reset-view    Reset camera pose, stop pose loop
-  POST  /restart       Restart cast session
-  POST  /stop          Stop casting`);
+      });
   },
   async (argv) => {
-    await castCommand({
-      port: argv.port as number,
-      listenPort: argv.listenPort as number,
-      pin: argv.pin as string | undefined,
-      idleTimeout: argv.idleTimeout as number | undefined,
-      lowBattery: argv.lowBattery as number | undefined,
-      width: argv.width as number,
-      height: argv.height as number,
-      verbose: argv.verbose as boolean,
-      open: argv.open as boolean,
-    });
+    const info = await ensureDaemon(argv.port as number | undefined);
+
+    // Enable stay-awake
+    const result = await daemonFetch(info, '/stay-awake/enable', {
+      body: { pin: argv.pin },
+    }) as { ok: boolean; error?: string };
+    if (result.ok) {
+      console.log('Stay-awake enabled');
+    } else if (result.error !== 'PIN required') {
+      console.warn('Stay-awake:', result.error);
+    }
+
+    const url = `http://localhost:${info.port}/`;
+    console.log(`\nDaemon running (PID: ${info.pid}, port: ${info.port})`);
+    console.log(`Dashboard: ${url}`);
+    console.log(`\nStart casting: curl -X POST ${url}cast/start`);
+    console.log(`Stop daemon:   quest-dev stop`);
   }
 );
 
@@ -317,7 +274,7 @@ cli.command(
     }
 
     // Enable via daemon
-    const info = await ensureDaemon();
+    const info = await ensureDaemon(argv.port as number | undefined);
     const result = await daemonFetch(info, '/stay-awake/enable', {
       body: { pin: argv.pin },
     }) as { ok: boolean; error?: string };
@@ -350,7 +307,7 @@ cli.command(
   },
   async (argv) => {
     const apkPath = resolve(argv.apk as string);
-    const info = await ensureDaemon();
+    const info = await ensureDaemon(argv.port as number | undefined);
 
     console.log(`Deploying: ${apkPath}`);
     const result = await daemonFetch(info, '/deploy', {
@@ -455,11 +412,12 @@ cli.command(
 
     const values: Record<string, unknown> = {};
     if (argv.pin !== undefined) values.pin = argv.pin;
+    if (argv.port !== undefined) values.port = argv.port;
     if (argv.idleTimeout !== undefined) values.idleTimeout = argv.idleTimeout;
     if (argv.lowBattery !== undefined) values.lowBattery = argv.lowBattery;
 
     if (Object.keys(values).length === 0) {
-      console.error('No config values provided. Use --pin, --idle-timeout, or --low-battery.');
+      console.error('No config values provided. Use --pin, --port, --idle-timeout, or --low-battery.');
       process.exit(1);
     }
 
@@ -473,35 +431,9 @@ cli.command(
 cli.command(
   'daemon',
   false as any, // Hide from help
-  (yargs) => {
-    return yargs
-      .option('port', {
-        type: 'number',
-        default: 19872,
-      });
-  },
+  () => {},
   async (argv) => {
-    await startDaemon(argv.port as number);
-  }
-);
-
-// Stay-awake watchdog (internal subcommand, spawned by cast command)
-cli.command(
-  'stay-awake-watchdog',
-  false as any, // Hide from help
-  (yargs) => {
-    return yargs
-      .option('parent-pid', {
-        type: 'number',
-        demandOption: true,
-      })
-      .option('pin', {
-        type: 'string',
-        demandOption: true,
-      });
-  },
-  async (argv) => {
-    await stayAwakeWatchdog(argv.parentPid as number, argv.pin as string);
+    await startDaemon(resolvePort(argv.port as number | undefined));
   }
 );
 
