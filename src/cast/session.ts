@@ -555,7 +555,8 @@ export class CastSession extends EventEmitter {
     if (this._connected && this.subMagic) {
       this.sendXrsp(buildPose(this.subMagic, this.nextSeq(), this._pose));
     }
-    // Auto-start periodic pose loop on first pose send
+    // Auto-start periodic pose loop on first pose send so the Quest
+    // accepts our camera override (requires continuous ~27 Hz updates).
     if (!this._poseLoopActive) {
       this.startPoseLoop();
     }
@@ -650,6 +651,7 @@ export class CastSession extends EventEmitter {
   }
 
   resetView(): void {
+    this.stopPoseLoop();
     this.sendInputForwardingState(0);
     this._pose = createPoseState();
   }

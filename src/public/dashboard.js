@@ -157,8 +157,8 @@ function App() {
     showToast("Screenshot saved");
   };
   const doResetPose = async () => {
-    const r = await api("POST", "/cast/pose", { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 });
-    if (r?.ok) showToast("Pose reset");
+    await api("POST", "/cast/reset-view");
+    showToast("Back to HMD view");
   };
 
   // Derive display state from server
@@ -186,9 +186,7 @@ function App() {
 
     <div class="main">
       <div class="video-pane">
-        <img id="live-frame" ref=${imgRef} alt="Quest view" />
-        <div id="crosshair" ref=${crosshairRef}></div>
-        <div id="drag-overlay" ref=${overlayRef}></div>
+        <${VideoPane} active=${active} imgRef=${imgRef} crosshairRef=${crosshairRef} overlayRef=${overlayRef} />
       </div>
 
       <div class="sidebar">
@@ -218,9 +216,8 @@ function App() {
             <span>loop: ${s.pose_loop ? "~27 Hz" : "off"}</span>
           </div>
           <div class="btn-row">
-            <button class="secondary" style="flex:1;" onclick=${doResetPose}>Reset</button>
-            <button class="secondary" style="flex:1;" onclick=${async () => { const r = await api("POST", "/cast/pose", { x: 0, y: 0, z: 0 }); if (r?.ok) showToast("Origin"); }}>Origin</button>
-            <button class="secondary" style="flex:1;" disabled=${!s.pose_loop} onclick=${async () => { await api("POST", "/cast/pose-loop", { active: false }); await api("POST", "/cast/reset-view"); }}>Stop Loop</button>
+            <button class="secondary" style="flex:1;" onclick=${async () => { const r = await api("POST", "/cast/pose", { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }); if (r?.ok) showToast("Origin"); }}>Origin</button>
+            <button class=${s.pose_loop ? "" : "secondary"} style="flex:1;" onclick=${doResetPose}>${s.pose_loop ? "Back to HMD" : "Reset"}</button>
           </div>
         <//>
 
@@ -252,13 +249,27 @@ function App() {
           <div class="keybind-hint">
             <b>WASD</b> / <b>Arrows</b> move \u00a0 <b>IJKL</b> look \u00a0 <b>QE</b> up/down<br />
             <b>Drag</b> free look \u00a0 <b>Right-click</b> click<br />
-            <b>Space</b> click \u00a0 <b>P</b> screenshot \u00a0 <b>Esc</b> reset
+            <b>Space</b> click \u00a0 <b>P</b> screenshot \u00a0 <b>Esc</b> back to HMD<br />
+            Movement overrides HMD tracking from origin
           </div>
         <//>
       </div>
     </div>
 
     ${toast && html`<div class="toast show">${toast}</div>`}
+  `;
+}
+
+function VideoPane({ active, imgRef, crosshairRef, overlayRef }) {
+  if (!active) {
+    return html`<div class="video-placeholder">
+      <button onclick=${() => api("POST", "/cast/start")}>Start Casting</button>
+    </div>`;
+  }
+  return html`
+    <img id="live-frame" ref=${imgRef} alt="Quest view" />
+    <div id="crosshair" ref=${crosshairRef}></div>
+    <div id="drag-overlay" ref=${overlayRef}></div>
   `;
 }
 
