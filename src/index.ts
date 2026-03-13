@@ -19,6 +19,7 @@ import { saveConfig, loadConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
 import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, resolvePort } from './daemon/client.js';
 import { startDaemon } from './daemon/daemon.js';
+import { extractCastingApk, hasCastingApk, CASTING_APK_PATH } from './utils/casting-apk.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -424,6 +425,28 @@ cli.command(
     saveConfig(values as any);
     console.log('Config saved:');
     console.log(JSON.stringify(values, null, 2));
+  }
+);
+
+// Setup cast — extract casting APK from MQDH installer
+cli.command(
+  'setup-cast <source>',
+  'Extract casting APK from Meta Quest Developer Hub installer',
+  (yargs) => {
+    return yargs
+      .positional('source', {
+        describe: 'Path to MQDH .exe.zip, .exe, or extracted directory',
+        type: 'string',
+        demandOption: true,
+      })
+      .example('$0 setup-cast ~/Downloads/Meta-Quest-Developer-Hub-6.3.1.exe.zip', '');
+  },
+  async (argv) => {
+    const source = argv.source as string;
+    console.log('Extracting casting APK from MQDH...');
+    const apkPath = await extractCastingApk(resolve(source));
+    console.log(`Casting APK saved to: ${apkPath}`);
+    console.log('\nThe APK will be auto-installed on your Quest when you start casting.');
   }
 );
 

@@ -10,6 +10,7 @@ import { checkADBPath } from "../utils/adb.js";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { CastSession } from "../cast/session.js";
+import { ensureCastingInstalled } from "../utils/casting-apk.js";
 
 export interface CastStartOptions {
   listenPort?: number;
@@ -99,6 +100,10 @@ export class CastManager extends EventEmitter {
     // Get Quest IP
     const questIp = await this.getQuestIp();
     this.questIp = questIp;
+
+    // Ensure casting service APK is installed on Quest
+    const device = `${questIp}:5555`;
+    await ensureCastingInstalled(device);
 
     const listenPort = opts.listenPort ?? 4445;
     const width = opts.width ?? 2064;
