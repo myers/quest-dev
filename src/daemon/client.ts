@@ -74,17 +74,24 @@ export function resolvePort(cliPort?: number): number {
   return config.port ?? DEFAULT_PORT;
 }
 
+function printDaemonUrl(port: number): void {
+  console.log(`Daemon: http://127.0.0.1:${port} (API: /help)`);
+}
+
 /** Ensure daemon is running, starting it if needed. Returns connection info. */
 export async function ensureDaemon(cliPort?: number): Promise<DaemonInfo> {
   const existing = discoverDaemon();
   if (existing) {
     verbose(`Daemon already running (PID: ${existing.pid}, port: ${existing.port})`);
+    printDaemonUrl(existing.port);
     return existing;
   }
 
   const port = resolvePort(cliPort);
   console.log("Starting quest-dev daemon...");
-  return spawnDaemon(port);
+  const info = await spawnDaemon(port);
+  printDaemonUrl(info.port);
+  return info;
 }
 
 /** Make an HTTP request to the daemon */

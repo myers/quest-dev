@@ -51,6 +51,40 @@ export async function createDaemonServer(
 
   // --- Core endpoints ---
 
+  app.get("/help", async (_req, reply) => {
+    const help = `quest-dev daemon — REST API
+
+GET endpoints
+  /help                   This help screen
+  /status                 JSON: uptime, pid, stay_awake, cast, logcat, battery
+  /stay-awake/status      JSON: stay-awake state
+  /logcat/status          JSON: logcat capture state
+  /cast/help              Cast-specific API reference
+  /cast/status            JSON: cast session state
+  /cast/screenshot        Latest frame as JPEG
+  /cast/stream            MJPEG stream (multipart/x-mixed-replace)
+  /cast/layers            JSON: available layers and active layer ID
+  /cast/events            SSE stream: state changes and toast notifications
+
+POST endpoints (JSON body)
+  /shutdown               Shut down daemon
+  /stay-awake/enable      Enable stay-awake (body: { pin? })
+  /stay-awake/disable     Disable stay-awake
+  /logcat/start           Start logcat capture (body: { tag? })
+  /logcat/stop            Stop logcat capture
+  /cast/start             Start casting (body: { listen_port?, width?, height? })
+  /cast/stop              Stop casting
+  /cast/restart           Restart cast session
+  /cast/reset-view        Reset camera pose
+  /cast/home              Press Home button
+  /cast/config            Set resolution (body: { width, height })
+  /cast/eye               Set eye mode (body: { mode })
+  /cast/pose              Set/nudge camera pose
+  /cast/click             Tap at coordinates (body: { x, y })
+`;
+    return reply.type("text/plain").send(help);
+  });
+
   app.get("/status", async () => {
     let battery = null;
     try {
