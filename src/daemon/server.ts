@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { loadPin, loadConfig } from "../utils/config.js";
 import { getBatteryInfo } from "../utils/adb.js";
 import { execCommand } from "../utils/exec.js";
+import { adbArgs } from "../utils/adb.js";
 import { EYE_LEFT, EYE_RIGHT, EYE_STEREO } from "../cast/protocol/mud.js";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
@@ -541,12 +542,12 @@ POST endpoints (JSON body)
 
   app.post("/cast/home", async () => {
     try {
-      await execCommand("adb", [
+      await execCommand("adb", adbArgs(
         "shell",
         "input",
         "keyevent",
         "KEYCODE_HOME",
-      ]);
+      ));
       castManager.broadcastToast("Home");
       return { ok: true };
     } catch {

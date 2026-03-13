@@ -17,6 +17,7 @@ import {
 import { join } from "node:path";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
+import { adbArgs } from "../utils/adb.js";
 
 const LOG_DIR = process.env.LOG_DIR || "logs/logcat";
 const LOGFILE_LINK = join(LOG_DIR, "latest.txt");
@@ -62,13 +63,13 @@ export class LogcatManager {
 
     // Clear ring buffer
     try {
-      await execCommand("adb", ["logcat", "-c"]);
+      await execCommand("adb", adbArgs("logcat", "-c"));
     } catch (error) {
       verbose("Failed to clear logcat buffer:", (error as Error).message);
     }
 
     // Start logcat process
-    const args = ["logcat", "-v", "threadtime"];
+    const args = adbArgs("logcat", "-v", "threadtime");
     if (filter) {
       args.push(filter);
     }

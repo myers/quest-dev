@@ -13,6 +13,7 @@ import {
 } from "../utils/test-properties.js";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
+import { adbArgs, getAdbDevice } from "../utils/adb.js";
 
 export class StayAwakeManager {
   private enabled = false;
@@ -34,7 +35,7 @@ export class StayAwakeManager {
     this.enabled = true;
     // Wake screen
     try {
-      await execCommand("adb", ["shell", "input", "keyevent", "KEYCODE_WAKEUP"]);
+      await execCommand("adb", adbArgs("shell", "input", "keyevent", "KEYCODE_WAKEUP"));
     } catch {
       // Non-fatal
     }
@@ -61,7 +62,9 @@ export class StayAwakeManager {
     if (!this.enabled || !this.pin) return;
     try {
       const args = buildSetPropertyArgs(this.pin, false);
-      execSync(`adb ${args.join(" ")}`, { stdio: "ignore" });
+      const device = getAdbDevice();
+      const deviceFlag = device ? `-s ${device} ` : "";
+      execSync(`adb ${deviceFlag}${args.join(" ")}`, { stdio: "ignore" });
     } catch {
       // Best-effort
     }

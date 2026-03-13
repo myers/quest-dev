@@ -6,6 +6,7 @@
  */
 
 import { execCommand, execCommandFull } from "./exec.js";
+import { adbArgs } from "./adb.js";
 
 export interface TestProperties {
   disable_guardian: boolean;
@@ -63,7 +64,7 @@ export async function setTestProperties(
   pin: string,
   enabled: boolean,
 ): Promise<void> {
-  const args = buildSetPropertyArgs(pin, enabled);
+  const args = adbArgs(...buildSetPropertyArgs(pin, enabled));
   await execCommand("adb", args);
 }
 
@@ -71,11 +72,11 @@ export async function setTestProperties(
  * Call GET_PROPERTY and return parsed test properties.
  */
 export async function getTestProperties(): Promise<TestProperties> {
-  const result = await execCommandFull("adb", [
+  const result = await execCommandFull("adb", adbArgs(
     "shell", "content", "call",
     "--uri", "content://com.oculus.rc",
     "--method", "GET_PROPERTY",
-  ]);
+  ));
   return parseTestProperties(result.stdout);
 }
 

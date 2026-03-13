@@ -9,6 +9,27 @@ import { verbose } from './verbose.js';
 
 const CDP_PORT = 9223; // Chrome DevTools Protocol port (Quest browser default)
 
+/** Global ADB device target. When set, all adb commands use -s <device>. */
+let targetDevice: string | undefined;
+
+/** Set the global ADB device target (IP:port or serial). */
+export function setAdbDevice(device: string | undefined): void {
+  targetDevice = device;
+}
+
+/** Get the global ADB device target. */
+export function getAdbDevice(): string | undefined {
+  return targetDevice;
+}
+
+/** Build ADB args with -s <device> prefix when a target device is set. */
+export function adbArgs(...args: string[]): string[] {
+  if (targetDevice) {
+    return ["-s", targetDevice, ...args];
+  }
+  return args;
+}
+
 /**
  * Get browser process PID
  */
@@ -428,7 +449,7 @@ export interface BatteryInfo {
  * Get Quest battery info as structured data
  */
 export async function getBatteryInfo(): Promise<BatteryInfo> {
-  const result = await execCommandFull('adb', ['shell', 'dumpsys', 'battery']);
+  const result = await execCommandFull('adb', adbArgs('shell', 'dumpsys', 'battery'));
 
   if (result.code !== 0) {
     throw new Error('Failed to get battery status');

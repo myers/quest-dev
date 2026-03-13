@@ -172,10 +172,11 @@ export class CastManager extends EventEmitter {
   }
 
   private async getQuestIp(): Promise<string> {
-    // If a device IP was configured, use it directly
+    // If a device IP was configured, use it directly (strip :port if present)
     if (this.configuredDevice) {
-      verbose(`Using configured device: ${this.configuredDevice}`);
-      return this.configuredDevice;
+      const ip = this.configuredDevice.split(":")[0];
+      verbose(`Using configured device: ${ip}`);
+      return ip;
     }
 
     const devOutput = await execCommand("adb", ["devices"]);

@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { execCommand, execCommandFull } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
+import { adbArgs } from "../utils/adb.js";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 
@@ -97,7 +98,7 @@ export async function deploy(
 
   // Force-stop existing app
   try {
-    await execCommand("adb", ["shell", "am", "force-stop", packageName]);
+    await execCommand("adb", adbArgs("shell", "am", "force-stop", packageName));
     verbose(`Force-stopped ${packageName}`);
   } catch {
     // App might not be running
@@ -106,7 +107,7 @@ export async function deploy(
   // Install APK
   console.log("Installing APK...");
   try {
-    const installOutput = await execCommand("adb", ["install", "-r", absPath]);
+    const installOutput = await execCommand("adb", adbArgs("install", "-r", absPath));
     verbose("Install output:", installOutput.trim());
     console.log("APK installed");
   } catch (error) {
@@ -126,7 +127,7 @@ export async function deploy(
   console.log("Launching app...");
   try {
     // Try to launch via monkey (works for any app with a launcher activity)
-    await execCommand("adb", [
+    await execCommand("adb", adbArgs(
       "shell",
       "monkey",
       "-p",
@@ -134,7 +135,7 @@ export async function deploy(
       "-c",
       "android.intent.category.LAUNCHER",
       "1",
-    ]);
+    ));
     verbose(`Launched ${packageName}`);
   } catch (error) {
     return {
@@ -165,11 +166,11 @@ export async function deploy(
   }
 
   // Verify process is still running
-  const psResult = await execCommandFull("adb", [
+  const psResult = await execCommandFull("adb", adbArgs(
     "shell",
     "pidof",
     packageName,
-  ]);
+  ));
   const processAlive = psResult.code === 0 && psResult.stdout.trim().length > 0;
 
   if (!processAlive) {

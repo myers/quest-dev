@@ -6,7 +6,7 @@
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { getBatteryInfo } from "../utils/adb.js";
+import { getBatteryInfo, setAdbDevice } from "../utils/adb.js";
 import { loadConfig } from "../utils/config.js";
 import { verbose } from "../utils/verbose.js";
 import { StayAwakeManager } from "./stay-awake-manager.js";
@@ -28,6 +28,9 @@ export async function startDaemon(port: number, cliDevice?: string): Promise<voi
   const idleTimeout = config.idleTimeout ?? 300000;
   const lowBattery = config.lowBattery ?? 10;
   const device = cliDevice ?? config.device;
+  if (device) {
+    setAdbDevice(device);
+  }
 
   const stayAwake = new StayAwakeManager();
   const logcat = new LogcatManager();
