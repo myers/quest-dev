@@ -71,9 +71,9 @@ describe("pose", () => {
     });
 
     it("moves forward in facing direction", () => {
-      const pose = createPoseState(); // facing +Z (yaw=0)
+      const pose = createPoseState(); // facing +Y (yaw=0)
       const moved = updatePose(pose, { dForward: 1.0 });
-      expect(moved.z).toBeCloseTo(1.0);
+      expect(moved.y).toBeCloseTo(1.0);
       expect(moved.x).toBeCloseTo(0);
     });
 
@@ -82,20 +82,20 @@ describe("pose", () => {
       pose = updatePose(pose, { dYaw: Math.PI / 2 }); // face +X
       const moved = updatePose(pose, { dForward: 1.0 });
       expect(moved.x).toBeCloseTo(1.0);
-      expect(moved.z).toBeCloseTo(0, 5);
+      expect(moved.y).toBeCloseTo(0, 5);
     });
 
     it("strafes perpendicular to facing", () => {
-      const pose = createPoseState(); // facing +Z
+      const pose = createPoseState(); // facing +Y
       const moved = updatePose(pose, { dStrafe: 1.0 });
       expect(moved.x).toBeCloseTo(1.0);
-      expect(moved.z).toBeCloseTo(0);
+      expect(moved.y).toBeCloseTo(0);
     });
 
     it("applies vertical movement", () => {
       const pose = createPoseState();
       const moved = updatePose(pose, { dUp: 0.5 });
-      expect(moved.y).toBeCloseTo(0.5);
+      expect(moved.z).toBeCloseTo(0.5);
     });
 
     it("does not mutate the original state", () => {

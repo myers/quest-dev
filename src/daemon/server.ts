@@ -8,8 +8,7 @@ import fastifyStatic from "@fastify/static";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPin, loadConfig } from "../utils/config.js";
-import { getBatteryInfo, formatBatteryInfo } from "../utils/adb.js";
-import { verbose } from "../utils/verbose.js";
+import { getBatteryInfo } from "../utils/adb.js";
 import { execCommand } from "../utils/exec.js";
 import { EYE_LEFT, EYE_RIGHT, EYE_STEREO } from "../cast/protocol/mud.js";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
@@ -26,18 +25,6 @@ export interface DaemonServerOptions {
   castManager: CastManager;
   onActivity: () => void;
   onShutdown: () => void;
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
-}
-
-function round1(n: number): number {
-  return Math.round(n * 10) / 10;
-}
-
-function deg(rad: number): number {
-  return (rad * 180) / Math.PI;
 }
 
 export async function createDaemonServer(
@@ -218,14 +205,9 @@ export async function createDaemonServer(
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     });
-    // Send current state immediately
-    const session = castManager.getSession();
-    const init = {
-      connected: session?.connected ?? false,
-      running: session?.running ?? false,
-      pose_loop: session?.poseLoopActive ?? false,
-    };
-    reply.raw.write(`event: state\ndata: ${JSON.stringify(init)}\n\n`);
+    // Send full status snapshot immediately
+    const init = castManager.getStatus();
+    reply.raw.write(`event: status\ndata: ${JSON.stringify(init)}\n\n`);
     castManager.addSSEClient(reply.raw);
     _req.raw.on("close", () => castManager.removeSSEClient(reply.raw));
   });
@@ -311,33 +293,7 @@ POST endpoints (JSON body)
   });
 
   app.get("/cast/status", async () => {
-    const session = castManager.getSession();
-    if (!session) {
-      return { connected: false, running: false };
-    }
-    return {
-      connected: session.connected,
-      running: session.running,
-      width: session.width,
-      height: session.height,
-      frame_count: session.frameCount,
-      bytes: session.byteCount,
-      fps: session.fps,
-      elapsed: session.running
-        ? Math.round((Date.now() - Date.now()) / 100) / 10
-        : 0,
-      has_frame: session.getScreenshot() !== null,
-      pose_loop: session.poseLoopActive,
-      pose: {
-        x: round4(session.pose.x),
-        y: round4(session.pose.y),
-        z: round4(session.pose.z),
-        yaw: round4(session.pose.yaw),
-        pitch: round4(session.pose.pitch),
-        yaw_deg: round1(deg(session.pose.yaw)),
-        pitch_deg: round1(deg(session.pose.pitch)),
-      },
-    };
+    return castManager.getStatus();
   });
 
   app.get("/cast/layers", async () => {
@@ -387,6 +343,7 @@ POST endpoints (JSON body)
       const height = req.body?.height ?? session.height;
       session.sendDisplayConfig(width, height);
       castManager.broadcastToast(`Resolution: ${width}\u00d7${height}`);
+      castManager.broadcastStatus();
       return { ok: true, width, height };
     },
   );
@@ -404,6 +361,7 @@ POST endpoints (JSON body)
     const eye = eyeMap[mode] ?? EYE_LEFT;
     session.sendDisplayConfig(session.width, session.height, eye);
     castManager.broadcastToast(`Eye mode: ${mode}`);
+    castManager.broadcastStatus();
     return { ok: true, mode };
   });
 
@@ -475,19 +433,8 @@ POST endpoints (JSON body)
       });
     }
 
-    const p = session.pose;
-    return {
-      ok: true,
-      x: round4(p.x),
-      y: round4(p.y),
-      z: round4(p.z),
-      yaw: round4(p.yaw),
-      pitch: round4(p.pitch),
-      qw: round4(p.qw),
-      qx: round4(p.qx),
-      qy: round4(p.qy),
-      qz: round4(p.qz),
-    };
+    castManager.broadcastStatus();
+    return { ok: true };
   });
 
   app.post<{
@@ -524,8 +471,8 @@ POST endpoints (JSON body)
       return {
         ok: true,
         action: "click",
-        yaw: round4(yaw),
-        pitch: round4(pitch),
+        yaw: Math.round(yaw * 10000) / 10000,
+        pitch: Math.round(pitch * 10000) / 10000,
         dwell_ms: dwellMs,
       };
     }
@@ -544,6 +491,7 @@ POST endpoints (JSON body)
       } else {
         session.stopPoseLoop();
       }
+      castManager.broadcastStatus();
       return { ok: true, pose_loop: session.poseLoopActive };
     },
   );
@@ -553,7 +501,7 @@ POST endpoints (JSON body)
     if (!session?.connected) return { error: "cast not active" };
     session.resetView();
     castManager.broadcastToast("View reset");
-    castManager.broadcast("state", { pose_loop: false });
+    castManager.broadcastStatus();
     return { ok: true, mode: "normal" };
   });
 

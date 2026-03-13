@@ -1,6 +1,7 @@
 /**
  * CastManager: lazy-loaded manager for cast sessions within the daemon.
  * Wraps CastSession with start/stop lifecycle and SSE broadcasting.
+ * Server state is the single source of truth — pushed to clients via SSE.
  */
 
 import { EventEmitter } from "node:events";
@@ -16,10 +17,23 @@ export interface CastStartOptions {
   height?: number;
 }
 
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+function deg(rad: number): number {
+  return (rad * 180) / Math.PI;
+}
+
 export class CastManager extends EventEmitter {
   private session: CastSession | null = null;
   private sseClients = new Set<ServerResponse>();
   private questIp: string | null = null;
+  private statsInterval: ReturnType<typeof setInterval> | null = null;
 
   get isActive(): boolean {
     return this.session !== null && this.session.connected;
@@ -27,6 +41,37 @@ export class CastManager extends EventEmitter {
 
   getSession(): CastSession | null {
     return this.session;
+  }
+
+  /** Build full status snapshot from current session state. */
+  getStatus(): Record<string, unknown> {
+    const session = this.session;
+    if (!session) {
+      return { connected: false, running: false };
+    }
+    const p = session.pose;
+    return {
+      connected: session.connected,
+      running: session.running,
+      width: session.width,
+      height: session.height,
+      frame_count: session.frameCount,
+      bytes: session.byteCount,
+      fps: session.fps,
+      elapsed: session.elapsedSeconds,
+      has_frame: session.getScreenshot() !== null,
+      eye: session.eye === 0 ? "right" : session.eye === 2 ? "stereo" : "left",
+      pose_loop: session.poseLoopActive,
+      pose: {
+        x: round4(p.x),
+        y: round4(p.y),
+        z: round4(p.z),
+        yaw: round4(p.yaw),
+        pitch: round4(p.pitch),
+        yaw_deg: round1(deg(p.yaw)),
+        pitch_deg: round1(deg(p.pitch)),
+      },
+    };
   }
 
   async start(opts: CastStartOptions = {}): Promise<void> {
@@ -64,19 +109,16 @@ export class CastManager extends EventEmitter {
     this.session = session;
 
     // Wire session events → SSE broadcast
-    session.on("connected", () =>
-      this.broadcast("state", { connected: true, running: true }),
-    );
-    session.on("disconnected", () => {
-      this.broadcast("state", {
-        connected: false,
-        running: false,
-        pose_loop: false,
-      });
-    });
-    session.on("pose-loop", (active: boolean) =>
-      this.broadcast("state", { pose_loop: active }),
-    );
+    session.on("connected", () => this.broadcastStatus());
+    session.on("disconnected", () => this.broadcastStatus());
+    session.on("pose-loop", () => this.broadcastStatus());
+
+    // Broadcast stats periodically (every 500ms) for smooth dashboard updates
+    this.statsInterval = setInterval(() => {
+      if (session.connected) {
+        this.broadcastStatus();
+      }
+    }, 500);
 
     await session.bind();
     if (session.listenPort !== listenPort) {
@@ -91,16 +133,11 @@ export class CastManager extends EventEmitter {
 
   async stop(): Promise<void> {
     await this.stopSession();
-    this.broadcast("state", {
-      connected: false,
-      running: false,
-      pose_loop: false,
-    });
+    this.broadcastStatus();
   }
 
   async restart(): Promise<void> {
     if (!this.session) {
-      // No session to restart — start fresh
       await this.start();
       return;
     }
@@ -109,6 +146,10 @@ export class CastManager extends EventEmitter {
   }
 
   private async stopSession(): Promise<void> {
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
     if (this.session) {
       try {
         await this.session.stop();
@@ -153,6 +194,11 @@ export class CastManager extends EventEmitter {
     }
   }
 
+  /** Broadcast full status snapshot as SSE "status" event. */
+  broadcastStatus(): void {
+    this.broadcast("status", this.getStatus());
+  }
+
   broadcastToast(msg: string): void {
     this.broadcast("toast", { message: msg });
   }
@@ -168,6 +214,10 @@ export class CastManager extends EventEmitter {
   // --- Cleanup ---
 
   cleanup(): void {
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
     if (this.session) {
       try {
         this.session.stop();
@@ -176,7 +226,6 @@ export class CastManager extends EventEmitter {
       }
       this.session = null;
     }
-    // Close all SSE connections
     for (const res of this.sseClients) {
       try {
         res.end();

@@ -96,6 +96,9 @@ export class CastSession extends EventEmitter {
   private _poseLoopTimer: ReturnType<typeof setInterval> | null = null;
   private _poseLoopActive = false;
 
+  // Eye mode
+  private _eye = 1; // EYE_LEFT default
+
   // Input forwarding
   private inputForwardingStarted = false;
   private _layerId = 0;
@@ -130,6 +133,10 @@ export class CastSession extends EventEmitter {
   get layerId(): number { return this._layerId; }
 
   get poseLoopActive(): boolean { return this._poseLoopActive; }
+  get eye(): number { return this._eye; }
+  get elapsedSeconds(): number {
+    return this.startTime > 0 ? Math.round((Date.now() - this.startTime) / 100) / 10 : 0;
+  }
 
   get fps(): number {
     const elapsed = this.startTime > 0 ? (Date.now() - this.startTime) / 1000 : 0;
@@ -596,6 +603,7 @@ export class CastSession extends EventEmitter {
       this.sendXrsp(buildDisplayConfig(this.subMagic, this.nextSeq(), width, height, eye));
       this._width = width;
       this._height = height;
+      if (eye !== undefined) this._eye = eye;
     }
   }
 

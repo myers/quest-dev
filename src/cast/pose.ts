@@ -49,8 +49,8 @@ export function updatePose(state: PoseState, delta: PoseDelta): PoseState {
   const cy = Math.cos(yaw);
   const sy = Math.sin(yaw);
   const x = state.x + dForward * sy + dStrafe * cy;
-  const z = state.z + dForward * cy - dStrafe * sy;
-  const y = state.y + dUp;
+  const y = state.y + dForward * cy - dStrafe * sy;
+  const z = state.z + dUp;
 
   const q = eulerToQuat(yaw, pitch);
   return { x, y, z, ...q, yaw, pitch };
