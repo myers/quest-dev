@@ -44,15 +44,15 @@ export function discoverDaemon(): DaemonInfo | null {
 }
 
 /** Spawn daemon as a detached background process */
-async function spawnDaemon(port: number): Promise<DaemonInfo> {
-  const child = spawn(
-    process.execPath,
-    [process.argv[1], "daemon", "--port", String(port)],
-    {
-      detached: true,
-      stdio: "ignore",
-    },
-  );
+async function spawnDaemon(port: number, device?: string): Promise<DaemonInfo> {
+  const args = [process.argv[1], "daemon", "--port", String(port)];
+  if (device) {
+    args.push("--device", device);
+  }
+  const child = spawn(process.execPath, args, {
+    detached: true,
+    stdio: "ignore",
+  });
   child.unref();
 
   // Wait for daemon.json to appear (up to 5s)
@@ -78,8 +78,15 @@ function printDaemonUrl(port: number): void {
   console.log(`Daemon: http://127.0.0.1:${port} (API: /help)`);
 }
 
+/** Resolve device from CLI flag → config */
+export function resolveDevice(cliDevice?: string): string | undefined {
+  if (cliDevice) return cliDevice;
+  const config = loadConfig();
+  return config.device;
+}
+
 /** Ensure daemon is running, starting it if needed. Returns connection info. */
-export async function ensureDaemon(cliPort?: number): Promise<DaemonInfo> {
+export async function ensureDaemon(cliPort?: number, cliDevice?: string): Promise<DaemonInfo> {
   const existing = discoverDaemon();
   if (existing) {
     verbose(`Daemon already running (PID: ${existing.pid}, port: ${existing.port})`);
@@ -88,8 +95,9 @@ export async function ensureDaemon(cliPort?: number): Promise<DaemonInfo> {
   }
 
   const port = resolvePort(cliPort);
+  const device = resolveDevice(cliDevice);
   console.log("Starting quest-dev daemon...");
-  const info = await spawnDaemon(port);
+  const info = await spawnDaemon(port, device);
   printDaemonUrl(info.port);
   return info;
 }

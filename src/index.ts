@@ -46,6 +46,11 @@ const cli = yargs(hideBin(process.argv))
     type: 'number',
     global: true,
   })
+  .option('device', {
+    describe: 'Quest IP address (or save with: quest-dev config --device)',
+    type: 'string',
+    global: true,
+  })
   .fail((msg, err, yargs) => {
     yargs.showHelp();
     if (err) console.error(err.message);
@@ -138,7 +143,7 @@ cli.command(
     }
 
     // Delegate to daemon
-    const info = await ensureDaemon(argv.port as number | undefined);
+    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
     switch (action) {
       case 'start': {
         const result = await daemonFetch(info, '/logcat/start', {
@@ -216,7 +221,7 @@ cli.command(
       });
   },
   async (argv) => {
-    const info = await ensureDaemon(argv.port as number | undefined);
+    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
 
     // Enable stay-awake
     const result = await daemonFetch(info, '/stay-awake/enable', {
@@ -275,7 +280,7 @@ cli.command(
     }
 
     // Enable via daemon
-    const info = await ensureDaemon(argv.port as number | undefined);
+    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
     const result = await daemonFetch(info, '/stay-awake/enable', {
       body: { pin: argv.pin },
     }) as { ok: boolean; error?: string };
@@ -308,7 +313,7 @@ cli.command(
   },
   async (argv) => {
     const apkPath = resolve(argv.apk as string);
-    const info = await ensureDaemon(argv.port as number | undefined);
+    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
 
     console.log(`Deploying: ${apkPath}`);
     const result = await daemonFetch(info, '/deploy', {
@@ -414,11 +419,12 @@ cli.command(
     const values: Record<string, unknown> = {};
     if (argv.pin !== undefined) values.pin = argv.pin;
     if (argv.port !== undefined) values.port = argv.port;
+    if (argv.device !== undefined) values.device = argv.device;
     if (argv.idleTimeout !== undefined) values.idleTimeout = argv.idleTimeout;
     if (argv.lowBattery !== undefined) values.lowBattery = argv.lowBattery;
 
     if (Object.keys(values).length === 0) {
-      console.error('No config values provided. Use --pin, --port, --idle-timeout, or --low-battery.');
+      console.error('No config values provided. Use --pin, --port, --device, --idle-timeout, or --low-battery.');
       process.exit(1);
     }
 
@@ -456,7 +462,7 @@ cli.command(
   false as any, // Hide from help
   () => {},
   async (argv) => {
-    await startDaemon(resolvePort(argv.port as number | undefined));
+    await startDaemon(resolvePort(argv.port as number | undefined), argv.device as string | undefined);
   }
 );
 

@@ -23,14 +23,15 @@ export interface DaemonInfo {
   startedAt: string;
 }
 
-export async function startDaemon(port: number): Promise<void> {
+export async function startDaemon(port: number, cliDevice?: string): Promise<void> {
   const config = loadConfig();
   const idleTimeout = config.idleTimeout ?? 300000;
   const lowBattery = config.lowBattery ?? 10;
+  const device = cliDevice ?? config.device;
 
   const stayAwake = new StayAwakeManager();
   const logcat = new LogcatManager();
-  const castManager = new CastManager();
+  const castManager = new CastManager(device);
 
   // Idle timer
   let idleHandle: NodeJS.Timeout | null = null;

@@ -34,7 +34,13 @@ export class CastManager extends EventEmitter {
   private session: CastSession | null = null;
   private sseClients = new Set<ServerResponse>();
   private questIp: string | null = null;
+  private configuredDevice: string | undefined;
   private statsInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor(device?: string) {
+    super();
+    this.configuredDevice = device;
+  }
 
   get isActive(): boolean {
     return this.session !== null && this.session.connected;
@@ -166,6 +172,12 @@ export class CastManager extends EventEmitter {
   }
 
   private async getQuestIp(): Promise<string> {
+    // If a device IP was configured, use it directly
+    if (this.configuredDevice) {
+      verbose(`Using configured device: ${this.configuredDevice}`);
+      return this.configuredDevice;
+    }
+
     const devOutput = await execCommand("adb", ["devices"]);
     const devLines = devOutput.trim().split("\n").slice(1);
     const firstDevice = devLines.find((l) => l.includes("device"));
