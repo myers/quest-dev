@@ -1,7 +1,13 @@
 /**
  * Casting APK extraction and installation utilities.
- * The debug APK (com.oculus.magicislandcastingservice.debug.apk) is required
- * on the Quest for casting. It ships inside Meta Quest Developer Hub (MQDH).
+ *
+ * The casting service APK ships inside Meta Quest Developer Hub (MQDH).
+ * We extract both debug and release variants:
+ *   - Release APK: needed for Quest 2 (system app has matching signature)
+ *   - Debug APK: needed for Quest 3/3S (no system app pre-installed)
+ *
+ * On install, we try release first (works if system app exists or no conflict),
+ * then fall back to debug if release fails (signature mismatch = no system app).
  */
 
 import { existsSync, mkdirSync, statSync, readdirSync, copyFileSync, rmSync } from "node:fs";
@@ -12,16 +18,18 @@ import { execCommand } from "./exec.js";
 import { verbose } from "./verbose.js";
 
 const CASTING_PKG = "com.oculus.magicislandcastingservice";
-const APK_FILENAME = "com.oculus.magicislandcastingservice.debug.apk";
+const RELEASE_APK = "com.oculus.magicislandcastingservice.release.apk";
+const DEBUG_APK = "com.oculus.magicislandcastingservice.debug.apk";
 const APK_DIR = join(homedir(), ".local", "share", "quest-dev");
-export const CASTING_APK_PATH = join(APK_DIR, APK_FILENAME);
+const RELEASE_APK_PATH = join(APK_DIR, RELEASE_APK);
+const DEBUG_APK_PATH = join(APK_DIR, DEBUG_APK);
 
-/** Path inside the NSIS-extracted MQDH where the APK lives */
-const NSIS_APK_REL = "resources/bin/Casting/Resources/" + APK_FILENAME;
+/** Path inside the NSIS-extracted MQDH where the APKs live */
+const CASTING_RES_REL = "resources/bin/Casting/Resources/";
 
 /**
- * Extract the debug casting APK from a MQDH installer (.exe.zip, .exe, or pre-extracted dir).
- * Uses 7z to crack open the NSIS installer.
+ * Extract casting APKs from a MQDH installer (.exe.zip, .exe, or pre-extracted dir).
+ * Extracts both release and debug variants.
  */
 export async function extractCastingApk(source: string): Promise<string> {
   mkdirSync(APK_DIR, { recursive: true });
@@ -32,7 +40,6 @@ export async function extractCastingApk(source: string): Promise<string> {
   if (stat.isDirectory()) {
     searchDir = source;
   } else if (source.endsWith(".zip")) {
-    // .exe.zip — extract zip first, then NSIS
     const tmpZip = join(APK_DIR, "mqdh-zip-tmp");
     rmSync(tmpZip, { recursive: true, force: true });
     execFileSync("7z", ["x", `-o${tmpZip}`, source, "-y"], { stdio: "pipe" });
@@ -50,34 +57,48 @@ export async function extractCastingApk(source: string): Promise<string> {
     );
   }
 
-  // Find the APK
-  const apkPath = join(searchDir, NSIS_APK_REL);
-  if (!existsSync(apkPath)) {
-    // Try to find it anywhere in the extracted tree
-    const found = findFile(searchDir, APK_FILENAME);
-    if (!found) {
-      throw new Error(
-        `Could not find ${APK_FILENAME} in extracted MQDH. Is this the right installer?`,
-      );
+  // Extract both APK variants
+  let found = 0;
+  for (const [filename, destPath] of [
+    [RELEASE_APK, RELEASE_APK_PATH],
+    [DEBUG_APK, DEBUG_APK_PATH],
+  ] as const) {
+    const knownPath = join(searchDir, CASTING_RES_REL, filename);
+    if (existsSync(knownPath)) {
+      copyFileSync(knownPath, destPath);
+      found++;
+    } else {
+      const foundPath = findFile(searchDir, filename);
+      if (foundPath) {
+        copyFileSync(foundPath, destPath);
+        found++;
+      }
     }
-    copyFileSync(found, CASTING_APK_PATH);
-  } else {
-    copyFileSync(apkPath, CASTING_APK_PATH);
+  }
+
+  if (found === 0) {
+    throw new Error(
+      "Could not find casting APKs in extracted MQDH. Is this the right installer?",
+    );
   }
 
   // Cleanup temp extraction dirs
   rmSync(join(APK_DIR, "mqdh-app-tmp"), { recursive: true, force: true });
 
-  return CASTING_APK_PATH;
+  const variants = [
+    existsSync(RELEASE_APK_PATH) ? "release" : null,
+    existsSync(DEBUG_APK_PATH) ? "debug" : null,
+  ].filter(Boolean);
+  console.log(`Extracted casting APKs (${variants.join(", ")})`);
+
+  return APK_DIR;
 }
 
 function extractNsis(exePath: string): string {
-  // Step 1: Extract NSIS installer
   const nsisDir = join(APK_DIR, "mqdh-nsis-tmp");
   rmSync(nsisDir, { recursive: true, force: true });
   execFileSync("7z", ["x", `-o${nsisDir}`, exePath, "-y"], { stdio: "pipe" });
 
-  // Step 2: Extract app-64.7z inside $PLUGINSDIR
   const inner = join(nsisDir, "$PLUGINSDIR", "app-64.7z");
   if (!existsSync(inner)) {
     throw new Error("Could not find app-64.7z inside NSIS installer");
@@ -86,15 +107,12 @@ function extractNsis(exePath: string): string {
   rmSync(appDir, { recursive: true, force: true });
   execFileSync("7z", ["x", `-o${appDir}`, inner, "-y"], { stdio: "pipe" });
 
-  // Clean up NSIS dir (keep appDir)
   rmSync(nsisDir, { recursive: true, force: true });
-
   return appDir;
 }
 
 /** Recursively find a file by name */
 function findFile(dir: string, name: string): string | null {
-  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     try {
@@ -111,9 +129,9 @@ function findFile(dir: string, name: string): string | null {
   return null;
 }
 
-/** Check whether the casting APK has been extracted locally */
+/** Check whether any casting APK variant has been extracted locally */
 export function hasCastingApk(): boolean {
-  return existsSync(CASTING_APK_PATH);
+  return existsSync(RELEASE_APK_PATH) || existsSync(DEBUG_APK_PATH);
 }
 
 /** Check if casting service is installed on the connected Quest device */
@@ -128,18 +146,70 @@ export async function isCastingInstalled(device: string): Promise<boolean> {
   }
 }
 
-/** Install the casting APK onto the Quest device */
+/**
+ * Install the casting APK onto the Quest device.
+ * Tries release APK first (works on Quest 2 with system app),
+ * falls back to debug APK (works on Quest 3/3S without system app).
+ */
 export async function installCastingApk(device: string): Promise<void> {
   if (!hasCastingApk()) {
     throw new Error(
       `Casting APK not found. Run: quest-dev setup-cast <path-to-mqdh-installer>`,
     );
   }
-  verbose(`Installing casting APK on ${device}...`);
-  await execCommand("adb", ["-s", device, "install", "-r", CASTING_APK_PATH]);
+
+  // On Quest 2, the casting service is a system app. The system version's
+  // signature only matches the release APK. On Quest 3, there's no system
+  // version, so either APK works — but we must uninstall for user 0 first
+  // if the system version was previously disabled.
+  //
+  // Strategy: try release first, fall back to debug.
+  const apksToTry: [string, string][] = [];
+  if (existsSync(RELEASE_APK_PATH)) {
+    apksToTry.push(["release", RELEASE_APK_PATH]);
+  }
+  if (existsSync(DEBUG_APK_PATH)) {
+    apksToTry.push(["debug", DEBUG_APK_PATH]);
+  }
+
+  for (const [variant, path] of apksToTry) {
+    try {
+      verbose(`Trying ${variant} APK: ${path}`);
+      await execCommand("adb", ["-s", device, "install", "-r", "-g", path]);
+      verbose(`Installed ${variant} casting APK`);
+      return;
+    } catch (error) {
+      verbose(`${variant} APK install failed: ${(error as Error).message}`);
+      // If signature mismatch and this is a system app, try uninstalling
+      // for the current user first to clear the system version
+      if ((error as Error).message.includes("INSTALL_FAILED_UPDATE_INCOMPATIBLE")) {
+        try {
+          verbose("Uninstalling system version for current user...");
+          await execCommand("adb", [
+            "-s", device, "shell", "pm", "uninstall", "-k", "--user", "0", CASTING_PKG,
+          ]);
+          // Retry this variant
+          try {
+            await execCommand("adb", ["-s", device, "install", "-r", "-g", path]);
+            verbose(`Installed ${variant} casting APK (after user uninstall)`);
+            return;
+          } catch {
+            verbose(`${variant} APK still failed after user uninstall`);
+          }
+        } catch {
+          verbose("User uninstall failed");
+        }
+      }
+    }
+  }
+
+  throw new Error(
+    "Failed to install casting APK. Try installing manually:\n" +
+    `  adb -s ${device} install -r ${RELEASE_APK_PATH}`,
+  );
 }
 
-/** Ensure casting service is installed, installing if needed. Returns true if install was performed. */
+/** Ensure casting service is installed, installing if needed. */
 export async function ensureCastingInstalled(device: string): Promise<boolean> {
   if (await isCastingInstalled(device)) {
     verbose("Casting service already installed");

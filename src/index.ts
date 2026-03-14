@@ -19,7 +19,7 @@ import { saveConfig, loadConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
 import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, resolvePort } from './daemon/client.js';
 import { startDaemon } from './daemon/daemon.js';
-import { extractCastingApk, hasCastingApk, CASTING_APK_PATH } from './utils/casting-apk.js';
+import { extractCastingApk, hasCastingApk } from './utils/casting-apk.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -449,10 +449,10 @@ cli.command(
   },
   async (argv) => {
     const source = argv.source as string;
-    console.log('Extracting casting APK from MQDH...');
-    const apkPath = await extractCastingApk(resolve(source));
-    console.log(`Casting APK saved to: ${apkPath}`);
+    console.log('Extracting casting APKs from MQDH...');
+    await extractCastingApk(resolve(source));
     console.log('\nThe APK will be auto-installed on your Quest when you start casting.');
+    console.log('(Release APK for Quest 2, debug APK for Quest 3/3S)');
   }
 );
 
