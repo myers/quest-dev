@@ -58,7 +58,7 @@ const cli = yargs(hideBin(process.argv))
   })
   .help()
   .alias('help', 'h')
-  .epilog('Requires ADB and Quest connected via USB. Sets up CDP on port 9223 for cdp-cli.');
+  .epilog('Requires ADB and Quest connected via USB or Wi-Fi (adb connect).');
 
 // Screenshot command (standalone — no daemon needed)
 cli.command(
@@ -335,6 +335,7 @@ cli.command(
       if (result.logcatFile) {
         console.log(`Logcat: ${result.logcatFile}`);
       }
+      console.log(`Daemon API: http://127.0.0.1:${info.port}/help`);
     } else if (result.crashed) {
       console.error(`\nCRASH DETECTED: ${result.package}`);
       if (result.logcatLines && result.logcatLines.length > 0) {
