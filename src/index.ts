@@ -332,25 +332,21 @@ cli.command(
 
     if (result.ok) {
       console.log(`\nDeploy successful: ${result.package} is running`);
-      if (result.logcatFile) {
-        console.log(`Logcat: ${result.logcatFile}`);
-      }
+      console.log(`Logcat: ${result.logcatFile}`);
       console.log(`Daemon API: http://127.0.0.1:${info.port}/help`);
     } else if (result.crashed) {
       console.error(`\nCRASH DETECTED: ${result.package}`);
       if (result.logcatLines && result.logcatLines.length > 0) {
-        console.error('\n--- Crash logcat ---');
+        console.error(`\n--- ${result.logcatFile} ---`);
         for (const line of result.logcatLines) {
           console.error(line);
         }
-        console.error('--- End crash logcat ---\n');
+        console.error(`--- End ${result.logcatFile} ---\n`);
       }
       if (result.error) {
         console.error(result.error);
       }
-      if (result.logcatFile) {
-        console.error(`Logcat: ${result.logcatFile}`);
-      }
+      console.error(`Logcat: ${result.logcatFile}`);
       process.exit(1);
     } else {
       console.error(`\nDeploy failed: ${result.error}`);

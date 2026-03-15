@@ -17,14 +17,10 @@ export interface DeployOptions {
   pin?: string;
 }
 
-export interface DeployResult {
-  ok: boolean;
-  package: string;
-  crashed: boolean;
-  logcatLines?: string[];
-  logcatFile?: string;
-  error?: string;
-}
+export type DeployResult =
+  | { ok: true;  package: string; crashed: false; logcatFile: string }
+  | { ok: false; package: string; crashed: true;  logcatFile: string; logcatLines?: string[]; error?: string }
+  | { ok: false; package: string; crashed: false; error: string; logcatFile?: string };
 
 /**
  * Extract package name from APK using aapt2 or aapt
@@ -121,7 +117,8 @@ export async function deploy(
 
   // Start logcat capture (clears buffer first)
   await logcat.start();
-  const logcatFile = logcat.status().file ?? undefined;
+  const logcatFile = logcat.status().file;
+  if (!logcatFile) throw new Error("logcat started but no file created");
 
   // Launch app
   console.log("Launching app...");
