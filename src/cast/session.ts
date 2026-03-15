@@ -7,10 +7,10 @@ import { createServer, type Server, type Socket } from "node:net";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { FrameDecoder } from "./decoder.js";
-import { createPoseState, eulerToQuat, updatePose, setPoseAbsolute } from "./pose.js";
+import { createPoseState, eulerToQuat, updatePose, setPoseOffset } from "./pose.js";
 import {
   type LayerInfo,
-  type PoseAbsolute,
+  type PoseOffset,
   type PoseDelta,
   type PoseState,
   type XrspHeader,
@@ -567,8 +567,8 @@ export class CastSession extends EventEmitter {
     this.sendPose(this._pose);
   }
 
-  setPoseAbsolute(abs: PoseAbsolute): void {
-    this._pose = setPoseAbsolute(this._pose, abs);
+  setPoseOffset(abs: PoseOffset): void {
+    this._pose = setPoseOffset(this._pose, abs);
     this.sendPose(this._pose);
   }
 

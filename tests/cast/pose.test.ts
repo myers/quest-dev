@@ -3,7 +3,7 @@ import {
   createPoseState,
   eulerToQuat,
   screenToYawPitch,
-  setPoseAbsolute,
+  setPoseOffset,
   updatePose,
 } from "../../src/cast/pose.js";
 
@@ -116,10 +116,10 @@ describe("pose", () => {
     });
   });
 
-  describe("setPoseAbsolute", () => {
+  describe("setPoseOffset", () => {
     it("sets position fields", () => {
       const pose = createPoseState();
-      const updated = setPoseAbsolute(pose, { x: 1, y: 2, z: 3 });
+      const updated = setPoseOffset(pose, { x: 1, y: 2, z: 3 });
       expect(updated.x).toBe(1);
       expect(updated.y).toBe(2);
       expect(updated.z).toBe(3);
@@ -127,14 +127,14 @@ describe("pose", () => {
 
     it("sets orientation fields", () => {
       const pose = createPoseState();
-      const updated = setPoseAbsolute(pose, { yaw: 0.5, pitch: 0.3 });
+      const updated = setPoseOffset(pose, { yaw: 0.5, pitch: 0.3 });
       expect(updated.yaw).toBeCloseTo(0.5);
       expect(updated.pitch).toBeCloseTo(0.3);
     });
 
     it("preserves unset fields", () => {
-      const pose = setPoseAbsolute(createPoseState(), { x: 5, yaw: 1 });
-      const updated = setPoseAbsolute(pose, { y: 10 });
+      const pose = setPoseOffset(createPoseState(), { x: 5, yaw: 1 });
+      const updated = setPoseOffset(pose, { y: 10 });
       expect(updated.x).toBe(5);
       expect(updated.y).toBe(10);
       expect(updated.yaw).toBeCloseTo(1);
@@ -142,7 +142,7 @@ describe("pose", () => {
 
     it("does not mutate the original", () => {
       const pose = createPoseState();
-      setPoseAbsolute(pose, { x: 99 });
+      setPoseOffset(pose, { x: 99 });
       expect(pose.x).toBe(0);
     });
   });

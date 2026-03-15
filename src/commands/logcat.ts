@@ -12,7 +12,7 @@ import { spawn } from 'child_process';
 import { checkADBPath, checkADBDevices } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
 
-const LOG_DIR = process.env.LOG_DIR || 'logs/logcat';
+const LOG_DIR = resolve(process.env.LOG_DIR || 'logs/logcat');
 const PID_FILE = join(LOG_DIR, '.logcat_pid');
 const LOGFILE_LINK = join(LOG_DIR, 'latest.txt');
 

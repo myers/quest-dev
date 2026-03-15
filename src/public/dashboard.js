@@ -209,7 +209,7 @@ function App() {
           </div>
         <//>
 
-        <${Panel} title="Pose">
+        <${Panel} title="Offset from HMD">
           <div class="pose-readout">
             <span>${pose.x?.toFixed(2) ?? "0"}, ${pose.y?.toFixed(2) ?? "0"}, ${pose.z?.toFixed(2) ?? "0"}</span>
             <span>${pose.yaw_deg?.toFixed(1) ?? "0"}\u00b0 yaw, ${pose.pitch_deg?.toFixed(1) ?? "0"}\u00b0 pitch</span>

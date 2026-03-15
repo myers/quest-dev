@@ -76,11 +76,11 @@ POST endpoints (JSON body)
   /cast/start             Start casting (body: { listen_port?, width?, height? })
   /cast/stop              Stop casting
   /cast/restart           Restart cast session
-  /cast/reset-view        Reset camera pose
+  /cast/reset-view        Reset camera offset to headset
   /cast/home              Press Home button
   /cast/config            Set resolution (body: { width, height })
   /cast/eye               Set eye mode (body: { mode })
-  /cast/pose              Set/nudge camera pose
+  /cast/pose              Set/nudge camera offset from headset
   /cast/click             Tap at coordinates (body: { x, y })
 `;
     return reply.type("text/plain").send(help);
@@ -266,8 +266,8 @@ POST endpoints (JSON body)
                             { width: 2064, height: 1162 }
   /cast/eye               Set eye mode
                             { mode: "left" | "right" | "stereo" }
-  /cast/pose              Set or nudge camera pose
-                            Absolute: { x, y, z, yaw, pitch }
+  /cast/pose              Set or nudge camera offset from headset (not world space)
+                            Offset:   { x, y, z, yaw, pitch }  (relative to HMD)
                             Delta:    { dx, dy, dz, d_yaw, d_pitch }
   /cast/pose-loop         Toggle periodic pose refresh (~27 Hz)
                             { active: true | false }   (omit to toggle)
@@ -279,7 +279,7 @@ POST endpoints (JSON body)
   /cast/mud               Send raw MUD payload
                             { type: 0, payload_hex: "..." }
   /cast/home              Press the Home button (ADB keyevent)
-  /cast/reset-view        Reset camera to default pose, stop pose loop
+  /cast/reset-view        Reset camera offset to headset origin, stop pose loop
 `;
     return reply.type("text/plain").send(help);
   });
@@ -435,7 +435,7 @@ POST endpoints (JSON body)
     if (!session?.connected) return { error: "cast not active" };
     const data = req.body ?? {};
 
-    // Absolute pose set
+    // Direct offset from headset (not world-space)
     if (
       "x" in data ||
       "y" in data ||
@@ -443,7 +443,7 @@ POST endpoints (JSON body)
       "yaw" in data ||
       "pitch" in data
     ) {
-      session.setPoseAbsolute({
+      session.setPoseOffset({
         x: data.x,
         y: data.y,
         z: data.z,
@@ -496,7 +496,7 @@ POST endpoints (JSON body)
       const pitch = data.pitch ?? session.pose.pitch;
       const dwellMs = data.dwell_ms ?? 1200;
 
-      session.setPoseAbsolute({ yaw, pitch });
+      session.setPoseOffset({ yaw, pitch });
       const steps = Math.floor(dwellMs / 16);
       for (let i = 0; i < steps; i++) {
         session.sendPose(session.pose);

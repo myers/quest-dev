@@ -29,6 +29,10 @@ export interface LayerInfo {
   pkg: string;
 }
 
+/**
+ * Camera pose as an offset from the headset's position when casting started.
+ * Coordinates are relative to the headset, not absolute world space.
+ */
 export interface PoseState {
   x: number;
   y: number;
@@ -41,6 +45,7 @@ export interface PoseState {
   pitch: number;
 }
 
+/** Incremental movement relative to the current camera offset. */
 export interface PoseDelta {
   dForward?: number;
   dStrafe?: number;
@@ -49,7 +54,8 @@ export interface PoseDelta {
   dPitch?: number;
 }
 
-export interface PoseAbsolute {
+/** Set camera offset directly (relative to headset, not world space). */
+export interface PoseOffset {
   x?: number;
   y?: number;
   z?: number;

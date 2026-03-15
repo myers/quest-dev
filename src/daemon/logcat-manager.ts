@@ -14,12 +14,12 @@ import {
   symlinkSync,
   readdirSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs } from "../utils/adb.js";
 
-const LOG_DIR = process.env.LOG_DIR || "logs/logcat";
+const LOG_DIR = resolve(process.env.LOG_DIR || "logs/logcat");
 const LOGFILE_LINK = join(LOG_DIR, "latest.txt");
 
 export interface LogcatStatus {
