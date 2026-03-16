@@ -102,18 +102,23 @@ export async function deploy(
 
   // Install APK
   console.log("Installing APK...");
-  try {
-    const installOutput = await execCommand("adb", adbArgs("install", "-r", absPath));
-    verbose("Install output:", installOutput.trim());
-    console.log("APK installed");
-  } catch (error) {
+  const installResult = await execCommandFull("adb", adbArgs("install", "-r", absPath));
+  verbose("Install stdout:", installResult.stdout.trim());
+  verbose("Install stderr:", installResult.stderr.trim());
+  if (installResult.code !== 0) {
+    // adb install puts the failure reason on stdout (e.g. Failure [INSTALL_FAILED_...])
+    // while stderr just has the generic "adb: failed to install" line
+    const detail = [installResult.stdout.trim(), installResult.stderr.trim()]
+      .filter(Boolean)
+      .join("\n");
     return {
       ok: false,
       package: packageName,
       crashed: false,
-      error: `Install failed: ${(error as Error).message}`,
+      error: `Install failed (exit ${installResult.code}):\n${detail}`,
     };
   }
+  console.log("APK installed");
 
   // Start logcat capture (clears buffer first)
   await logcat.start();
