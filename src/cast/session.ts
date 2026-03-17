@@ -53,6 +53,7 @@ import {
 } from "./protocol/mud.js";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
+import { RESOLUTIONS, DEFAULT_RESOLUTION } from "./resolutions.js";
 
 export interface CastSessionOptions {
   listenPort?: number;
@@ -107,8 +108,9 @@ export class CastSession extends EventEmitter {
   constructor(options: CastSessionOptions = {}) {
     super();
     this._listenPort = options.listenPort ?? CAST_PORT;
-    this._width = options.width ?? 2064;
-    this._height = options.height ?? 1162;
+    const def = RESOLUTIONS[DEFAULT_RESOLUTION];
+    this._width = options.width ?? def.width;
+    this._height = options.height ?? def.height;
     this.sessionUuid = randomUUID();
     this.sessionTimestamp = String(Date.now());
     this._pose = createPoseState();

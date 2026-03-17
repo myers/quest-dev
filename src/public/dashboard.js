@@ -223,9 +223,9 @@ function App() {
 
         <${Panel} title="Display">
           <div class="btn-row">
-            <button class=${bc(curRes === "2064x1162")} onclick=${() => api("POST", "/cast/config", { width: 2064, height: 1162 })}>2064</button>
-            <button class=${bc(curRes === "1920x1080")} onclick=${() => api("POST", "/cast/config", { width: 1920, height: 1080 })}>1080p</button>
-            <button class=${bc(curRes === "1280x720")} onclick=${() => api("POST", "/cast/config", { width: 1280, height: 720 })}>720p</button>
+            <button class=${bc(curRes === "2064x1162")} onclick=${() => api("POST", "/cast/config", { resolution: "native" })}>Native</button>
+            <button class=${bc(curRes === "1920x1080")} onclick=${() => api("POST", "/cast/config", { resolution: "1080p" })}>1080p</button>
+            <button class=${bc(curRes === "1280x720")} onclick=${() => api("POST", "/cast/config", { resolution: "720p" })}>720p</button>
           </div>
           <div class="btn-row" style="margin-top:6px;">
             <button class=${bc(curEye === "left")} onclick=${() => api("POST", "/cast/eye", { mode: "left" })}>L Eye</button>

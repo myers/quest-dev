@@ -11,9 +11,11 @@ import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { CastSession } from "../cast/session.js";
 import { ensureCastingInstalled } from "../utils/casting-apk.js";
+import { resolveResolution } from "../cast/resolutions.js";
 
 export interface CastStartOptions {
   listenPort?: number;
+  resolution?: string;
   width?: number;
   height?: number;
 }
@@ -112,8 +114,7 @@ export class CastManager extends EventEmitter {
     await ensureCastingInstalled(device);
 
     const listenPort = opts.listenPort ?? 4445;
-    const width = opts.width ?? 2064;
-    const height = opts.height ?? 1162;
+    const { width, height } = resolveResolution(opts.resolution, opts.width, opts.height);
 
     // Create and start session
     const session = new CastSession({ listenPort, width, height });

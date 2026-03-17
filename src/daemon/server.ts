@@ -16,6 +16,7 @@ import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 import type { CastManager } from "./cast-manager.js";
 import { deploy, type DeployResult } from "./deploy.js";
+import { RESOLUTIONS, resolveResolution } from "../cast/resolutions.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -73,12 +74,13 @@ POST endpoints (JSON body)
   /stay-awake/disable     Disable stay-awake
   /logcat/start           Start logcat capture (body: { tag? })
   /logcat/stop            Stop logcat capture
-  /cast/start             Start casting (body: { listen_port?, width?, height? })
+  /cast/start             Start casting (body: { resolution?, listen_port? })
   /cast/stop              Stop casting
   /cast/restart           Restart cast session
   /cast/reset-view        Reset camera offset to headset
   /cast/home              Press Home button
-  /cast/config            Set resolution (body: { width, height })
+  /cast/resolutions       List available resolution presets
+  /cast/config            Set resolution (body: { resolution } or { width, height })
   /cast/eye               Set eye mode (body: { mode })
   /cast/pose              Set/nudge camera offset from headset
   /cast/click             Tap at coordinates (body: { x, y })
@@ -200,7 +202,7 @@ POST endpoints (JSON body)
   // --- Cast endpoints ---
 
   app.post<{
-    Body: { listen_port?: number; width?: number; height?: number };
+    Body: { listen_port?: number; resolution?: string; width?: number; height?: number };
   }>("/cast/start", async (req) => {
     if (castManager.isActive) {
       return { ok: true, already_running: true };
@@ -208,6 +210,7 @@ POST endpoints (JSON body)
     try {
       await castManager.start({
         listenPort: req.body?.listen_port,
+        resolution: req.body?.resolution,
         width: req.body?.width,
         height: req.body?.height,
       });
@@ -258,12 +261,15 @@ GET endpoints
   /cast/layers            JSON: available layers and active layer ID
   /cast/events            SSE stream: state changes and toast notifications
 
+GET endpoints (continued)
+  /cast/resolutions       List available resolution presets
+
 POST endpoints (JSON body)
-  /cast/start             Start casting (optional: { listen_port, width, height })
+  /cast/start             Start casting (optional: { resolution, listen_port })
   /cast/stop              Stop casting (daemon stays running)
   /cast/restart           Restart cast session
   /cast/config            Set resolution
-                            { width: 2064, height: 1162 }
+                            { resolution: "720p" } or { width, height }
   /cast/eye               Set eye mode
                             { mode: "left" | "right" | "stereo" }
   /cast/pose              Set or nudge camera offset from headset (not world space)
@@ -369,13 +375,22 @@ POST endpoints (JSON body)
     return { ok: true };
   });
 
-  app.post<{ Body: { width?: number; height?: number } }>(
+  app.get("/cast/resolutions", async () => {
+    return Object.fromEntries(
+      Object.entries(RESOLUTIONS).map(([key, r]) => [key, `${r.width}x${r.height}`]),
+    );
+  });
+
+  app.post<{ Body: { resolution?: string; width?: number; height?: number } }>(
     "/cast/config",
     async (req) => {
       const session = castManager.getSession();
       if (!session?.connected) return { error: "cast not active" };
-      const width = req.body?.width ?? session.width;
-      const height = req.body?.height ?? session.height;
+      const { width, height } = resolveResolution(
+        req.body?.resolution,
+        req.body?.width ?? session.width,
+        req.body?.height ?? session.height,
+      );
       session.sendDisplayConfig(width, height);
       castManager.broadcastToast(`Resolution: ${width}\u00d7${height}`);
       castManager.broadcastStatus();
