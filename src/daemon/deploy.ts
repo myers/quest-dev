@@ -4,7 +4,7 @@
  */
 
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { execCommand, execCommandFull } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs } from "../utils/adb.js";
@@ -67,6 +67,14 @@ export async function deploy(
   // Validate APK exists
   if (!existsSync(absPath)) {
     return { ok: false, package: "", crashed: false, error: `APK not found: ${absPath}` };
+  }
+
+  // Warn if APK is stale (older than 1 minute — probably deploying old code)
+  const apkAge = Date.now() - statSync(absPath).mtimeMs;
+  if (apkAge > 60_000) {
+    const mins = Math.floor(apkAge / 60_000);
+    const secs = Math.floor((apkAge % 60_000) / 1000);
+    console.warn(`\n⚠️  APK is ${mins}m${secs}s old — you may be deploying stale code!\n`);
   }
 
   // Extract package name
