@@ -5,8 +5,9 @@
 
 import { resolve, join } from 'path';
 import { existsSync, statSync } from 'fs';
-import { checkADBPath, checkADBDevices, checkUSBFileTransfer, checkQuestAwake } from '../utils/adb.js';
+import { checkADBPath, checkADBDevices, checkUSBFileTransfer, checkQuestAwake, setAdbDevice, adbArgs } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
+import { loadConfig } from '../utils/config.js';
 import { generateScreenshotFilename } from '../utils/filename.js';
 import { addJpegFileComment } from '../utils/jpeg-comment.js';
 
@@ -37,7 +38,7 @@ function validateDirectory(dirPath: string): void {
  */
 async function triggerScreenshot(): Promise<boolean> {
   try {
-    await execCommand('adb', [
+    await execCommand('adb', adbArgs(
       'shell',
       'am',
       'startservice',
@@ -45,7 +46,7 @@ async function triggerScreenshot(): Promise<boolean> {
       'com.oculus.metacam/.capture.CaptureService',
       '-a',
       'TAKE_SCREENSHOT'
-    ]);
+    ));
     console.log('Screenshot service triggered');
     return true;
   } catch (error) {
@@ -59,7 +60,7 @@ async function triggerScreenshot(): Promise<boolean> {
  */
 async function getMostRecentScreenshot(): Promise<string | null> {
   try {
-    const output = await execCommand('adb', ['shell', 'ls', '-t', '/sdcard/Oculus/Screenshots/']);
+    const output = await execCommand('adb', adbArgs('shell', 'ls', '-t', '/sdcard/Oculus/Screenshots/'));
     const files = output.split('\n').filter(line => line.trim() && line.endsWith('.jpg'));
 
     if (files.length === 0) {
@@ -83,7 +84,7 @@ async function isJpegComplete(filename: string): Promise<boolean> {
     const { spawn } = await import('child_process');
 
     return new Promise((resolve) => {
-      const proc = spawn('adb', ['exec-out', 'tail', '-c', '2', remotePath]);
+      const proc = spawn('adb', adbArgs('exec-out', 'tail', '-c', '2', remotePath));
       const chunks: Buffer[] = [];
 
       proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -109,7 +110,7 @@ async function isJpegComplete(filename: string): Promise<boolean> {
 async function pullScreenshot(filename: string, outputPath: string): Promise<boolean> {
   try {
     const remotePath = `/sdcard/Oculus/Screenshots/${filename}`;
-    await execCommand('adb', ['pull', remotePath, outputPath]);
+    await execCommand('adb', adbArgs('pull', remotePath, outputPath));
     console.log(`Screenshot saved to: ${outputPath}`);
     return true;
   } catch (error) {
@@ -123,7 +124,7 @@ async function pullScreenshot(filename: string, outputPath: string): Promise<boo
  */
 async function deleteRemoteScreenshot(filename: string): Promise<void> {
   const remotePath = `/sdcard/Oculus/Screenshots/${filename}`;
-  const result = await execCommandFull('adb', ['shell', 'rm', remotePath]);
+  const result = await execCommandFull('adb', adbArgs('shell', 'rm', remotePath));
   if (result.code !== 0) {
     console.warn(`Warning: Failed to delete screenshot from Quest: ${filename}`);
   } else {
@@ -159,6 +160,12 @@ export async function screenshotCommand(directoryPath: string, caption: string |
   // Generate filename
   const localFilename = generateScreenshotFilename(new Date(), caption);
   const outputPath = join(resolvedDir, localFilename);
+
+  // Load device config so -s <device> targets the right Quest
+  const config = loadConfig();
+  if (config.device) {
+    setAdbDevice(config.device);
+  }
 
   // Check prerequisites
   checkADBPath();

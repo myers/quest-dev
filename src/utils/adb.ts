@@ -9,6 +9,11 @@ import { verbose } from './verbose.js';
 
 const CDP_PORT = 9223; // Chrome DevTools Protocol port (Quest browser default)
 
+/** Escape a string for safe use in adb shell commands. */
+function shellEscape(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
 /** Global ADB device target. When set, all adb commands use -s <device>. */
 let targetDevice: string | undefined;
 
@@ -35,33 +40,17 @@ export function adbArgs(...args: string[]): string[] {
  */
 async function getBrowserPID(packageName: string): Promise<number | null> {
   try {
-    const result = await execCommandFull('adb', ['shell', `ps | grep ${packageName}`]);
-    verbose('getBrowserPID ps output:', result.stdout?.trim());
-    if (!result.stdout) return null;
-
-    // Parse ps output: USER PID PPID ... NAME
-    // Only match the main process (exact package name at end of line), not
-    // child processes like :sandboxed_process0 or :privileged_process0
-    const lines = result.stdout.trim().split('\n');
-    for (const line of lines) {
-      if (line.includes('grep')) continue; // Skip grep itself
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 2) {
-        // Check that the process name is exactly the package (last column)
-        const processName = parts[parts.length - 1];
-        if (processName === packageName) {
-          const pid = parseInt(parts[1], 10);
-          verbose('getBrowserPID found PID:', pid, 'for', packageName);
-          return pid;
-        }
-      }
-    }
-    verbose('getBrowserPID: no exact match for', packageName);
+    const result = await execCommandFull('adb', ['shell', 'pidof', shellEscape(packageName)]);
+    verbose('getBrowserPID pidof output:', result.stdout?.trim());
+    if (!result.stdout?.trim()) return null;
+    const pid = parseInt(result.stdout.trim().split(/\s+/)[0], 10);
+    if (isNaN(pid)) return null;
+    verbose('getBrowserPID found PID:', pid, 'for', packageName);
+    return pid;
   } catch (e) {
     verbose('getBrowserPID error:', e);
     return null;
   }
-  return null;
 }
 
 /**
@@ -77,8 +66,7 @@ async function detectCDPSocket(packageName: string): Promise<string> {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const result = await execCommandFull('adb', [
-          'shell',
-          `cat /proc/net/unix | grep ${socketName}`
+          'shell', 'cat', '/proc/net/unix',
         ]);
         if (result.stdout.includes(socketName)) {
           verbose('detectCDPSocket: found PID-specific socket:', socketName, `(attempt ${attempt + 1})`);
@@ -153,9 +141,24 @@ async function restartADBServer(): Promise<boolean> {
  */
 export async function checkADBDevices(retryCount = 0): Promise<boolean> {
   try {
+    const target = getAdbDevice();
     const output = await execCommand('adb', ['devices']);
     const lines = output.trim().split('\n').slice(1); // Skip header
-    const devices = lines.filter(line => line.trim() && !line.includes('List of devices'));
+    let devices = lines.filter(line => line.trim() && !line.includes('List of devices'));
+
+    // If a target device is configured, check it's in the list
+    if (target) {
+      const targetOnline = devices.some(line => line.includes(target) && line.includes('device'));
+      if (!targetOnline) {
+        console.error(`Error: Configured device ${target} not found or offline`);
+        console.error('');
+        console.error('Check connection: adb connect ' + target);
+        console.error('');
+        process.exit(1);
+      }
+      // Filter to just the target device for the count
+      devices = devices.filter(line => line.includes(target));
+    }
 
     if (devices.length === 0) {
       console.error('Error: No ADB devices connected');
@@ -271,21 +274,10 @@ export async function ensurePortForwarding(
  */
 export async function isBrowserRunning(browser: string = 'com.oculus.browser'): Promise<boolean> {
   try {
-    const result = await execCommandFull('adb', ['shell', `ps | grep ${browser}`]);
-    verbose('isBrowserRunning ps output:', result.stdout?.trim());
-    // Check for exact process name match (not _zygote or :sandboxed_process)
-    const lines = result.stdout?.trim().split('\n') || [];
-    for (const line of lines) {
-      if (line.includes('grep')) continue;
-      const parts = line.trim().split(/\s+/);
-      const processName = parts[parts.length - 1];
-      if (processName === browser) {
-        verbose('isBrowserRunning:', browser, 'YES (PID', parts[1] + ')');
-        return true;
-      }
-    }
-    verbose('isBrowserRunning:', browser, 'NO (zygote/child only)');
-    return false;
+    const result = await execCommandFull('adb', ['shell', 'pidof', shellEscape(browser)]);
+    const running = result.code === 0 && result.stdout.trim().length > 0;
+    verbose('isBrowserRunning:', browser, running ? 'YES' : 'NO');
+    return running;
   } catch (error) {
     verbose('isBrowserRunning error:', error);
     return false;
@@ -408,7 +400,7 @@ export async function refreshCDPForwarding(
  * After reboot, user must click notification to allow file access
  */
 export async function checkUSBFileTransfer(): Promise<void> {
-  const result = await execCommandFull('adb', ['shell', 'ls', '/sdcard/']);
+  const result = await execCommandFull('adb', adbArgs('shell', 'ls', '/sdcard/'));
 
   if (result.code !== 0 ||
       result.stdout.includes('Permission denied') ||
@@ -429,7 +421,7 @@ export async function checkUSBFileTransfer(): Promise<void> {
  * Screenshots cannot be taken when the display is off
  */
 export async function checkQuestAwake(): Promise<void> {
-  const result = await execCommandFull('adb', ['shell', 'dumpsys', 'power']);
+  const result = await execCommandFull('adb', adbArgs('shell', 'dumpsys', 'power'));
 
   if (result.stdout.includes('mWakefulness=Asleep')) {
     console.error('Error: Quest display is off');
