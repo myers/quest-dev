@@ -108,26 +108,15 @@ export async function deploy(
     // App might not be running
   }
 
-  // Install APK: push with progress, then install on-device
+  // Install APK
   const apkSizeMB = (statSync(absPath).size / 1_048_576).toFixed(1);
-  const remotePath = `/data/local/tmp/${packageName}.apk`;
-  console.log(`Uploading APK (${apkSizeMB} MB)...`);
-  const pushCode = await execCommandStreaming("adb", adbArgs("push", absPath, remotePath));
-  if (pushCode !== 0) {
-    return {
-      ok: false,
-      package: packageName,
-      crashed: false,
-      error: `APK upload failed (exit ${pushCode})`,
-    };
-  }
-  console.log("Installing...");
-  const installResult = await execCommandFull("adb", adbArgs("shell", "pm", "install", "-r", remotePath));
+  console.log(`Installing APK (${apkSizeMB} MB)...`);
+  const installStart = Date.now();
+  const installResult = await execCommandFull("adb", adbArgs("install", "-r", absPath));
+  const installSecs = ((Date.now() - installStart) / 1000).toFixed(1);
   verbose("Install stdout:", installResult.stdout.trim());
   verbose("Install stderr:", installResult.stderr.trim());
-  // Clean up remote APK
-  await execCommandFull("adb", adbArgs("shell", "rm", "-f", remotePath));
-  if (installResult.code !== 0 || installResult.stdout.includes("Failure")) {
+  if (installResult.code !== 0) {
     const detail = [installResult.stdout.trim(), installResult.stderr.trim()]
       .filter(Boolean)
       .join("\n");
@@ -138,7 +127,7 @@ export async function deploy(
       error: `Install failed (exit ${installResult.code}):\n${detail}`,
     };
   }
-  console.log("APK installed");
+  console.log(`APK installed (${installSecs}s)`);
 
   // Start logcat capture (clears buffer first)
   await logcat.start();
