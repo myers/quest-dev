@@ -47,6 +47,26 @@ export function execCommand(command: string, args: string[] = []): Promise<strin
 }
 
 /**
+ * Execute a shell command with stdout/stderr streamed to the console in real time.
+ * Returns the exit code.
+ */
+export function execCommandStreaming(command: string, args: string[] = []): Promise<number> {
+  return new Promise((resolve) => {
+    const proc = spawn(command, args, {
+      stdio: 'inherit',
+    });
+
+    proc.on('close', (code) => {
+      resolve(code ?? 1);
+    });
+
+    proc.on('error', () => {
+      resolve(1);
+    });
+  });
+}
+
+/**
  * Execute a shell command and return full result (doesn't throw on non-zero exit)
  */
 export function execCommandFull(command: string, args: string[] = []): Promise<ExecResult> {

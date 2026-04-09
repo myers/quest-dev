@@ -5,7 +5,7 @@
 
 import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
-import { execCommand, execCommandFull } from "../utils/exec.js";
+import { execCommand, execCommandFull, execCommandStreaming } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs } from "../utils/adb.js";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
@@ -108,14 +108,26 @@ export async function deploy(
     // App might not be running
   }
 
-  // Install APK (--fastdeploy diffs and only uploads changed parts)
-  console.log("Installing APK...");
-  const installResult = await execCommandFull("adb", adbArgs("install", "-r", "--fastdeploy", absPath));
+  // Install APK: push with progress, then install on-device
+  const apkSizeMB = (statSync(absPath).size / 1_048_576).toFixed(1);
+  const remotePath = `/data/local/tmp/${packageName}.apk`;
+  console.log(`Uploading APK (${apkSizeMB} MB)...`);
+  const pushCode = await execCommandStreaming("adb", adbArgs("push", absPath, remotePath));
+  if (pushCode !== 0) {
+    return {
+      ok: false,
+      package: packageName,
+      crashed: false,
+      error: `APK upload failed (exit ${pushCode})`,
+    };
+  }
+  console.log("Installing...");
+  const installResult = await execCommandFull("adb", adbArgs("shell", "pm", "install", "-r", remotePath));
   verbose("Install stdout:", installResult.stdout.trim());
   verbose("Install stderr:", installResult.stderr.trim());
-  if (installResult.code !== 0) {
-    // adb install puts the failure reason on stdout (e.g. Failure [INSTALL_FAILED_...])
-    // while stderr just has the generic "adb: failed to install" line
+  // Clean up remote APK
+  await execCommandFull("adb", adbArgs("shell", "rm", "-f", remotePath));
+  if (installResult.code !== 0 || installResult.stdout.includes("Failure")) {
     const detail = [installResult.stdout.trim(), installResult.stderr.trim()]
       .filter(Boolean)
       .join("\n");
