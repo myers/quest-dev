@@ -100,6 +100,15 @@ export async function deploy(
     }
   }
 
+  // Keep Quest awake during install (prevents WiFi ADB disconnect on large APKs)
+  try {
+    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_enable"));
+    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close"));
+    verbose("Sent stay-awake broadcasts for install");
+  } catch {
+    verbose("Failed to send stay-awake broadcasts (non-fatal)");
+  }
+
   // Force-stop existing app
   try {
     await execCommand("adb", adbArgs("shell", "am", "force-stop", packageName));
