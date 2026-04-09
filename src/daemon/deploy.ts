@@ -66,15 +66,6 @@ export async function deploy(
 
   // Keep Quest awake FIRST — before anything else touches ADB.
   // Large APK uploads over WiFi ADB fail if the Quest sleeps mid-transfer.
-  try {
-    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_enable"));
-    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close"));
-    verbose("Sent stay-awake broadcasts");
-  } catch {
-    verbose("Failed to send stay-awake broadcasts (non-fatal)");
-  }
-
-  // Enable full stay-awake on first deploy (lazy)
   if (!stayAwake.isEnabled && pin) {
     try {
       await stayAwake.enable(pin);
