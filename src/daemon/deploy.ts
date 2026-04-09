@@ -64,6 +64,25 @@ export async function deploy(
   const { apkPath, crashWaitMs = 5000, pin } = options;
   const absPath = resolve(apkPath);
 
+  // Keep Quest awake FIRST — before anything else touches ADB.
+  // Large APK uploads over WiFi ADB fail if the Quest sleeps mid-transfer.
+  try {
+    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_enable"));
+    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close"));
+    verbose("Sent stay-awake broadcasts");
+  } catch {
+    verbose("Failed to send stay-awake broadcasts (non-fatal)");
+  }
+
+  // Enable full stay-awake on first deploy (lazy)
+  if (!stayAwake.isEnabled && pin) {
+    try {
+      await stayAwake.enable(pin);
+    } catch (error) {
+      console.warn("Failed to enable stay-awake:", (error as Error).message);
+    }
+  }
+
   // Validate APK exists
   if (!existsSync(absPath)) {
     return { ok: false, package: "", crashed: false, error: `APK not found: ${absPath}` };
@@ -89,24 +108,6 @@ export async function deploy(
       crashed: false,
       error: (error as Error).message,
     };
-  }
-
-  // Enable stay-awake on first deploy (lazy)
-  if (!stayAwake.isEnabled && pin) {
-    try {
-      await stayAwake.enable(pin);
-    } catch (error) {
-      console.warn("Failed to enable stay-awake:", (error as Error).message);
-    }
-  }
-
-  // Keep Quest awake during install (prevents WiFi ADB disconnect on large APKs)
-  try {
-    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_enable"));
-    await execCommandFull("adb", adbArgs("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close"));
-    verbose("Sent stay-awake broadcasts for install");
-  } catch {
-    verbose("Failed to send stay-awake broadcasts (non-fatal)");
   }
 
   // Force-stop existing app
