@@ -108,9 +108,9 @@ export async function deploy(
     // App might not be running
   }
 
-  // Install APK
+  // Install APK (--fastdeploy diffs and only uploads changed parts)
   console.log("Installing APK...");
-  const installResult = await execCommandFull("adb", adbArgs("install", "-r", absPath));
+  const installResult = await execCommandFull("adb", adbArgs("install", "-r", "--fastdeploy", absPath));
   verbose("Install stdout:", installResult.stdout.trim());
   verbose("Install stderr:", installResult.stderr.trim());
   if (installResult.code !== 0) {
