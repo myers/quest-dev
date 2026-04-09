@@ -50,7 +50,7 @@ export function parseTestProperties(output: string): TestProperties {
   for (const pair of pairs) {
     const [key, value] = pair.split("=");
     if (key && value && key in defaults) {
-      (defaults as unknown as Record<string, boolean>)[key] = value === "true";
+      defaults[key as keyof TestProperties] = value === "true";
     }
   }
 

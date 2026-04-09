@@ -11,12 +11,11 @@ import { loadPin, loadConfig } from "../utils/config.js";
 import { getBatteryInfo } from "../utils/adb.js";
 import { execCommand } from "../utils/exec.js";
 import { adbArgs } from "../utils/adb.js";
-import { EYE_LEFT, EYE_RIGHT, EYE_STEREO } from "../cast/protocol/mud.js";
+import { EYE_LEFT, EYE_RIGHT, EYE_STEREO, RESOLUTIONS, resolveResolution } from "@myerscarpenter/cast2-protocol";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 import type { CastManager } from "./cast-manager.js";
 import { deploy, type DeployResult } from "./deploy.js";
-import { RESOLUTIONS, resolveResolution } from "../cast/resolutions.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -311,26 +310,35 @@ POST endpoints (JSON body)
       Connection: "close",
     });
 
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearInterval(interval);
+      try { reply.raw.end(); } catch { /* ignore */ }
+    };
+
     const interval = setInterval(() => {
       const s = castManager.getSession();
       if (!s?.running) {
-        clearInterval(interval);
-        reply.raw.end();
+        cleanup();
         return;
       }
-      const jpeg = s.getScreenshot();
-      if (jpeg) {
-        reply.raw.write(
-          `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`,
-        );
-        reply.raw.write(jpeg);
-        reply.raw.write("\r\n");
+      try {
+        const jpeg = s.getScreenshot();
+        if (jpeg) {
+          reply.raw.write(
+            `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`,
+          );
+          reply.raw.write(jpeg);
+          reply.raw.write("\r\n");
+        }
+      } catch {
+        cleanup();
       }
     }, 200);
 
-    _req.raw.on("close", () => {
-      clearInterval(interval);
-    });
+    _req.raw.on("close", cleanup);
   });
 
   app.get("/cast/status", async () => {
@@ -450,7 +458,7 @@ POST endpoints (JSON body)
     if (!session?.connected) return { error: "cast not active" };
     const data = req.body ?? {};
 
-    // Direct offset from headset (not world-space)
+    // Direct offset from headset (not world-space) — takes priority over deltas
     if (
       "x" in data ||
       "y" in data ||
@@ -465,9 +473,8 @@ POST endpoints (JSON body)
         yaw: data.yaw,
         pitch: data.pitch,
       });
-    }
-    // Incremental deltas
-    if (
+    } else if (
+      // Incremental deltas — only when no offset fields present
       "dx" in data ||
       "dy" in data ||
       "dz" in data ||

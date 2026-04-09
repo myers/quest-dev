@@ -7,13 +7,16 @@ import { createServer, type Server, type Socket } from "node:net";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { FrameDecoder } from "./decoder.js";
-import { createPoseState, eulerToQuat, updatePose, setPoseOffset } from "./pose.js";
 import {
   type LayerInfo,
   type PoseOffset,
   type PoseDelta,
   type PoseState,
   type XrspHeader,
+  createPoseState,
+  eulerToQuat,
+  updatePose,
+  setPoseOffset,
   parseXrspHeader,
   xrspPayloadSize,
   packXrsp,
@@ -29,13 +32,9 @@ import {
   CMD_SHORT_ACK_12D,
   KEEPALIVE_ACK_INCREMENT,
   LAYER_PANEL_APP,
-} from "./protocol/index.js";
-import {
   packMgikSub,
   detectSubMagic,
   isMgikMagic,
-} from "./protocol/mgik.js";
-import {
   buildInit,
   buildConfig,
   buildKeepalive,
@@ -50,10 +49,11 @@ import {
   buildActivateLayer,
   buildMud,
   parseLayerConfiguration,
-} from "./protocol/mud.js";
+  RESOLUTIONS,
+  DEFAULT_RESOLUTION,
+} from "@myerscarpenter/cast2-protocol";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
-import { RESOLUTIONS, DEFAULT_RESOLUTION } from "./resolutions.js";
 
 export interface CastSessionOptions {
   listenPort?: number;
@@ -103,6 +103,7 @@ export class CastSession extends EventEmitter {
   // Input forwarding
   private inputForwardingStarted = false;
   private _layerId = 0;
+  private _layerAutoSelected = false;
   private _layers = new Map<number, LayerInfo>();
 
   constructor(options: CastSessionOptions = {}) {
@@ -220,9 +221,22 @@ export class CastSession extends EventEmitter {
     this.currentIdr = null;
     this._pose = createPoseState();
     this.inputForwardingStarted = false;
+    this._layerAutoSelected = false;
     this._layers.clear();
 
     await new Promise((r) => setTimeout(r, 1000));
+
+    // Re-bind the TCP server (stop() closed it)
+    if (this.server) {
+      await new Promise<void>((resolve, reject) => {
+        this.server!.listen(this._listenPort, "0.0.0.0", () => resolve());
+        this.server!.once("error", reject);
+      });
+      verbose(`TCP server re-listening on port ${this._listenPort}`);
+    } else {
+      await this.bind();
+    }
+
     await this.start();
   }
 
@@ -237,7 +251,7 @@ export class CastSession extends EventEmitter {
       "-s", device, "shell",
       "setprop debug.oculus.command_line_media_capture true",
     ]);
-    // Tell Quest to connect on port 4446 (matching MQDH convention)
+    // Set the port the Quest casting service will connect to
     await execCommand("adb", [
       "-s", device, "shell",
       `setprop debug.oculus.magic.port ${QUEST_CAST_PORT}`,
@@ -288,7 +302,7 @@ export class CastSession extends EventEmitter {
         verbose(`Connection #${idx} from ${socket.remoteAddress}`);
         connections.push(socket);
 
-        if (connections.length >= 2) {
+        if (connections.length === 2) {
           this.controlSocket = connections[0];
           this.videoSocket = connections[1];
           this._connected = true;
@@ -507,8 +521,9 @@ export class CastSession extends EventEmitter {
         this._layers.set(layer.id, layer);
         this._width = layer.width;
         this._height = layer.height;
-        if (layer.type === LAYER_PANEL_APP && this._layerId === 0) {
+        if (layer.type === LAYER_PANEL_APP && !this._layerAutoSelected) {
           this._layerId = layer.id;
+          this._layerAutoSelected = true;
           verbose(`Auto-selected PANEL_APP layer ${layer.id} for input`);
         }
         this.emit("layer", layer);

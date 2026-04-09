@@ -3,7 +3,7 @@
  * Extracted from stay-awake.ts — manages test properties lifecycle.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   buildSetPropertyArgs,
   setTestProperties,
@@ -63,8 +63,8 @@ export class StayAwakeManager {
     try {
       const args = buildSetPropertyArgs(this.pin, false);
       const device = getAdbDevice();
-      const deviceFlag = device ? `-s ${device} ` : "";
-      execSync(`adb ${deviceFlag}${args.join(" ")}`, { stdio: "ignore" });
+      const adb = device ? ["-s", device, ...args] : args;
+      execFileSync("adb", adb, { stdio: "ignore" });
     } catch {
       // Best-effort
     }

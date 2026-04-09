@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  closeSync,
   statSync,
   readFileSync,
   unlinkSync,
@@ -61,9 +62,12 @@ export class LogcatManager {
     const logFile = join(LOG_DIR, `logcat_${timestamp}.txt`);
     this.currentFile = logFile;
 
-    // Clear ring buffer
+    // Clear ring buffer (with timeout — adb logcat -c can hang on flaky connections)
     try {
-      await execCommand("adb", adbArgs("logcat", "-c"));
+      await Promise.race([
+        execCommand("adb", adbArgs("logcat", "-c")),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
+      ]);
     } catch (error) {
       verbose("Failed to clear logcat buffer:", (error as Error).message);
     }
@@ -80,6 +84,7 @@ export class LogcatManager {
       detached: true,
     });
     this.proc.unref();
+    closeSync(fd); // child process owns the fd now
 
     // Update symlink
     try {
@@ -150,33 +155,31 @@ export class LogcatManager {
   }
 
   /** Scan tail for crash patterns */
-  scanForCrash(lineCount: number = 200): { crashed: boolean; lines: string[] } {
+  scanForCrash(lineCount: number = 200): { crashed: boolean; lines: string[]; reason?: string; matchedLine?: string; matchedPattern?: string } {
     const tail = this.readTail(lineCount);
-    const crashPatterns = [
-      /FATAL EXCEPTION/i,
-      /panicked at/i,
-      /backtrace:/i,
-      /signal \d+ \(SIG/i,
-      /Native crash/i,
-      /ANR in/i,
-      /Process .+ has died/i,
-      /Force finishing activity/i,
+    const crashPatterns: Array<{ pattern: RegExp; label: string }> = [
+      { pattern: /FATAL EXCEPTION/i,          label: "FATAL EXCEPTION" },
+      { pattern: /panicked at/i,              label: "Rust panic" },
+      { pattern: /backtrace:/i,               label: "backtrace" },
+      { pattern: /signal \d+ \(SIG/i,         label: "signal/crash" },
+      { pattern: /Native crash/i,             label: "native crash" },
+      { pattern: /ANR in/i,                   label: "ANR (not responding)" },
+      { pattern: /Process .+ has died/i,      label: "process died" },
+      { pattern: /Force finishing activity/i,  label: "force finishing activity" },
     ];
 
-    const crashLines: string[] = [];
-    let crashed = false;
-
     for (const line of tail) {
-      for (const pattern of crashPatterns) {
+      for (const { pattern, label } of crashPatterns) {
         if (pattern.test(line)) {
-          crashed = true;
-          break;
+          const idx = tail.indexOf(line);
+          return {
+            crashed: true,
+            lines: tail.slice(idx),
+            reason: label,
+            matchedLine: line.trim(),
+            matchedPattern: pattern.source,
+          };
         }
-      }
-      if (crashed) {
-        // Once we find a crash, include this and all remaining lines
-        const idx = tail.indexOf(line);
-        return { crashed: true, lines: tail.slice(idx) };
       }
     }
 

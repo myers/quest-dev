@@ -3,3 +3,5 @@ export * from "./types.js";
 export * from "./xrsp.js";
 export * from "./mgik.js";
 export * from "./mud.js";
+export * from "./pose.js";
+export * from "./resolutions.js";

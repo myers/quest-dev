@@ -11,7 +11,7 @@ import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { CastSession } from "../cast/session.js";
 import { ensureCastingInstalled } from "../utils/casting-apk.js";
-import { resolveResolution } from "../cast/resolutions.js";
+import { resolveResolution } from "@myerscarpenter/cast2-protocol";
 
 export interface CastStartOptions {
   listenPort?: number;
@@ -38,6 +38,7 @@ export class CastManager extends EventEmitter {
   private questIp: string | null = null;
   private configuredDevice: string | undefined;
   private statsInterval: ReturnType<typeof setInterval> | null = null;
+  private starting = false;
 
   constructor(device?: string) {
     super();
@@ -87,60 +88,70 @@ export class CastManager extends EventEmitter {
     if (this.session?.connected) {
       return; // Already active
     }
-
-    // Stop any lingering session
-    if (this.session) {
-      await this.stopSession();
+    if (this.starting) {
+      throw new Error("Cast start already in progress");
     }
+    this.starting = true;
 
-    checkADBPath();
-
-    // Check for connected devices
-    const output = await execCommand("adb", ["devices"]);
-    const lines = output.trim().split("\n").slice(1);
-    const devices = lines.filter(
-      (line) => line.trim() && !line.includes("List of devices"),
-    );
-    if (devices.length === 0) {
-      throw new Error("No ADB devices connected");
-    }
-
-    // Get Quest IP
-    const questIp = await this.getQuestIp();
-    this.questIp = questIp;
-
-    // Ensure casting service APK is installed on Quest
-    const device = `${questIp}:5555`;
-    await ensureCastingInstalled(device);
-
-    const listenPort = opts.listenPort ?? 4445;
-    const { width, height } = resolveResolution(opts.resolution, opts.width, opts.height);
-
-    // Create and start session
-    const session = new CastSession({ listenPort, width, height });
-    this.session = session;
-
-    // Wire session events → SSE broadcast
-    session.on("connected", () => this.broadcastStatus());
-    session.on("disconnected", () => this.broadcastStatus());
-    session.on("pose-loop", () => this.broadcastStatus());
-
-    // Broadcast stats periodically (every 500ms) for smooth dashboard updates
-    this.statsInterval = setInterval(() => {
-      if (session.connected) {
-        this.broadcastStatus();
+    try {
+      // Stop any lingering session
+      if (this.session) {
+        await this.stopSession();
       }
-    }, 500);
 
-    await session.bind();
-    if (session.listenPort !== listenPort) {
-      verbose(
-        `Port ${listenPort} in use, listening on ${session.listenPort}`,
+      checkADBPath();
+
+      // Check for connected devices
+      const output = await execCommand("adb", ["devices"]);
+      const lines = output.trim().split("\n").slice(1);
+      const devices = lines.filter(
+        (line) => line.trim() && !line.includes("List of devices"),
       );
+      if (devices.length === 0) {
+        throw new Error("No ADB devices connected");
+      }
+
+      // Get Quest IP
+      const questIp = await this.getQuestIp();
+      this.questIp = questIp;
+
+      // Ensure casting service APK is installed on Quest
+      const device = `${questIp}:5555`;
+      await ensureCastingInstalled(device);
+
+      const listenPort = opts.listenPort ?? 4445;
+      const { width, height } = resolveResolution(opts.resolution, opts.width, opts.height);
+
+      // Create and start session
+      const session = new CastSession({ listenPort, width, height });
+      this.session = session;
+
+      // Wire session events → SSE broadcast
+      session.on("connected", () => this.broadcastStatus());
+      session.on("disconnected", () => this.broadcastStatus());
+      session.on("pose-loop", () => this.broadcastStatus());
+
+      // Complete all async setup before starting periodic work
+      await session.bind();
+      if (session.listenPort !== listenPort) {
+        verbose(
+          `Port ${listenPort} in use, listening on ${session.listenPort}`,
+        );
+      }
+      await session.adbSetup(questIp);
+      await session.start(questIp);
+
+      // Stats interval created AFTER all async ops succeed
+      this.statsInterval = setInterval(() => {
+        if (session.connected) {
+          this.broadcastStatus();
+        }
+      }, 500);
+
+      verbose("Quest connected, casting active");
+    } finally {
+      this.starting = false;
     }
-    await session.adbSetup(questIp);
-    await session.start(questIp);
-    verbose("Quest connected, casting active");
   }
 
   async stop(): Promise<void> {
@@ -209,7 +220,11 @@ export class CastManager extends EventEmitter {
   broadcast(event: string, data: unknown): void {
     const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const res of this.sseClients) {
-      res.write(msg);
+      try {
+        res.write(msg);
+      } catch {
+        this.sseClients.delete(res);
+      }
     }
   }
 

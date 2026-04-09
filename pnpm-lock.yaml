@@ -11,6 +11,9 @@ importers:
       '@fastify/static':
         specifier: ^9.0.0
         version: 9.0.0
+      '@myerscarpenter/cast2-protocol':
+        specifier: workspace:*
+        version: link:packages/cast2-protocol
       '@myerscarpenter/cdp-cli':
         specifier: '>=2.0.0'
         version: 2.0.0
@@ -51,6 +54,15 @@ importers:
       esbuild:
         specifier: ^0.27.4
         version: 0.27.4
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.3
+        version: 4.0.13(@types/node@24.10.1)(@vitest/ui@4.0.13)
+
+  packages/cast2-protocol:
+    devDependencies:
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

@@ -7,7 +7,7 @@
  */
 
 import { resolve, join } from 'path';
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, symlinkSync, statSync, readlinkSync, openSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, symlinkSync, statSync, readlinkSync, openSync, closeSync } from 'fs';
 import { spawn } from 'child_process';
 import { checkADBPath, checkADBDevices } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
@@ -167,6 +167,7 @@ export async function startCommand(filter?: string): Promise<void> {
     stdio: ['ignore', fd, fd],
     detached: true
   });
+  closeSync(fd); // child process owns the fd now
 
   // Unref so parent can exit immediately
   proc.unref();

@@ -15,11 +15,11 @@ import { openCommand } from './commands/open.js';
 import { tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
 import { stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
-import { saveConfig, loadConfig } from './utils/config.js';
+import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
 import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, resolvePort } from './daemon/client.js';
 import { startDaemon } from './daemon/daemon.js';
-import { extractCastingApk, hasCastingApk } from './utils/casting-apk.js';
+import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
 
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -154,6 +154,9 @@ cli.command(
           console.log(`File: ${result.file}`);
           console.log('');
           console.log('Now run your test. When done: quest-dev logcat stop');
+        } else {
+          console.error('Failed to start logcat capture');
+          console.error(JSON.stringify(result, null, 2));
         }
         break;
       }
@@ -413,43 +416,70 @@ cli.command(
       return;
     }
 
-    const values: Record<string, unknown> = {};
-    if (argv.pin !== undefined) values.pin = argv.pin;
-    if (argv.port !== undefined) values.port = argv.port;
-    if (argv.device !== undefined) values.device = argv.device;
-    if (argv.idleTimeout !== undefined) values.idleTimeout = argv.idleTimeout;
-    if (argv.lowBattery !== undefined) values.lowBattery = argv.lowBattery;
+    const values: QuestDevConfig = {};
+    if (argv.pin !== undefined) values.pin = argv.pin as string;
+    if (argv.port !== undefined) values.port = argv.port as number;
+    if (argv.device !== undefined) values.device = argv.device as string;
+    if (argv.idleTimeout !== undefined) values.idleTimeout = argv.idleTimeout as number;
+    if (argv.lowBattery !== undefined) values.lowBattery = argv.lowBattery as number;
 
     if (Object.keys(values).length === 0) {
       console.error('No config values provided. Use --pin, --port, --device, --idle-timeout, or --low-battery.');
       process.exit(1);
     }
 
-    saveConfig(values as any);
+    saveConfig(values);
     console.log('Config saved:');
     console.log(JSON.stringify(values, null, 2));
   }
 );
 
-// Setup cast — extract casting APK from MQDH installer
+// Setup cast — extract casting APK from MQDH
 cli.command(
-  'setup-cast <source>',
-  'Extract casting APK from Meta Quest Developer Hub installer',
+  'setup-cast [source]',
+  'Extract casting APK from Meta Quest Developer Hub',
   (yargs) => {
     return yargs
       .positional('source', {
-        describe: 'Path to MQDH .exe.zip, .exe, or extracted directory',
+        describe: 'Path to MQDH (.app, .dmg, .exe.zip, .exe, or directory). Omit to auto-detect.',
         type: 'string',
-        demandOption: true,
       })
-      .example('$0 setup-cast ~/Downloads/Meta-Quest-Developer-Hub-6.3.1.exe.zip', '');
+      .example('$0 setup-cast', 'Auto-detect MQDH installation')
+      .example('$0 setup-cast "/Applications/Meta Quest Developer Hub.app"', 'macOS .app')
+      .example('$0 setup-cast ~/Downloads/MetaQuestDeveloperHub.dmg', 'macOS .dmg')
+      .example('$0 setup-cast ~/Downloads/Meta-Quest-Developer-Hub.exe.zip', 'Windows installer');
   },
   async (argv) => {
-    const source = argv.source as string;
-    console.log('Extracting casting APKs from MQDH...');
+    // If APKs already extracted, just confirm
+    if (!argv.source && hasCastingApk()) {
+      console.log('Casting APKs already extracted. Ready to cast.');
+      console.log('(Run with a path argument to re-extract from a newer MQDH version.)');
+      return;
+    }
+
+    let source = argv.source as string | undefined;
+
+    // Auto-detect if no source provided
+    if (!source) {
+      const found = findInstalledMqdh();
+      if (found) {
+        console.log(`Found MQDH: ${found}`);
+        source = found;
+      } else {
+        console.log('Could not find Meta Quest Developer Hub on this machine.\n');
+        console.log('Download it from:');
+        console.log('  https://developer.oculus.com/meta-quest-developer-hub\n');
+        console.log('Then run:');
+        console.log('  quest-dev setup-cast /path/to/Meta\\ Quest\\ Developer\\ Hub.app   (macOS)');
+        console.log('  quest-dev setup-cast /path/to/MetaQuestDeveloperHub.dmg           (macOS)');
+        console.log('  quest-dev setup-cast /path/to/Meta-Quest-Developer-Hub.exe.zip    (Windows)');
+        process.exit(1);
+      }
+    }
+
+    console.log('Extracting casting APKs...');
     await extractCastingApk(resolve(source));
-    console.log('\nThe APK will be auto-installed on your Quest when you start casting.');
-    console.log('(Release APK for Quest 2, debug APK for Quest 3/3S)');
+    console.log('\nDone. The APK will be auto-installed on your Quest when you start casting.');
   }
 );
 

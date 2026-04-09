@@ -1,6 +1,6 @@
 {
   "name": "@myerscarpenter/quest-dev",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "CLI tools for Meta Quest development — stay awake, screenshots, URL opening, logcat, and battery via ADB",
   "type": "module",
   "bin": {
@@ -15,7 +15,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
-    "install:global": "pnpm run build && pnpm pack && pnpm install -g $PWD/myerscarpenter-quest-dev-$(node -p \"require('./package.json').version\").tgz && rm myerscarpenter-quest-dev-$(node -p \"require('./package.json').version\").tgz",
+    "install:global": "pnpm -r run build && pnpm run build && pnpm link --global",
     "version:patch": "pnpm version patch",
     "version:minor": "pnpm version minor",
     "version:major": "pnpm version major"
@@ -31,13 +31,14 @@
     "xr",
     "screenshot"
   ],
-  "author": "",
+  "author": "Myers Carpenter <myers@maski.org>",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/myers/quest-dev"
   },
   "dependencies": {
+    "@myerscarpenter/cast2-protocol": "workspace:*",
     "@fastify/static": "^9.0.0",
     "adbkit-apkreader": "^3.2.0",
     "fastify": "^5.8.2",

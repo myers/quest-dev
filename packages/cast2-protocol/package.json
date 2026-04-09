@@ -1,0 +1,46 @@
+{
+  "name": "@myerscarpenter/cast2-protocol",
+  "version": "0.1.0",
+  "description": "Cast 2.0 protocol implementation for Meta Quest video casting — XRSP framing, MGIK sub-headers, MUD message builders, pose math, and resolution presets",
+  "type": "module",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js"
+    }
+  },
+  "files": [
+    "build",
+    "docs"
+  ],
+  "scripts": {
+    "clean": "rm -rf build",
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "cast2",
+    "meta-quest",
+    "xrsp",
+    "mgik",
+    "vr",
+    "xr",
+    "protocol"
+  ],
+  "author": "Myers Carpenter <myers@maski.org>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/myers/quest-dev",
+    "directory": "packages/cast2-protocol"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

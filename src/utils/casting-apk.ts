@@ -2,34 +2,60 @@
  * Casting APK extraction and installation utilities.
  *
  * The casting service APK ships inside Meta Quest Developer Hub (MQDH).
- * We extract both debug and release variants:
- *   - Release APK: needed for Quest 2 (system app has matching signature)
- *   - Debug APK: needed for Quest 3/3S (no system app pre-installed)
  *
- * On install, we try release first (works if system app exists or no conflict),
- * then fall back to debug if release fails (signature mismatch = no system app).
+ * Supported MQDH sources:
+ *   - macOS: /Applications/Meta Quest Developer Hub.app (or any .app bundle)
+ *   - macOS: .dmg file (mounted, APKs extracted from the .app inside)
+ *   - Windows: .exe.zip or .exe (NSIS installer, extracted via 7z)
+ *   - Any platform: pre-extracted directory containing the APK files
  */
 
 import { existsSync, mkdirSync, statSync, readdirSync, copyFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { execCommand } from "./exec.js";
 import { verbose } from "./verbose.js";
 
 const CASTING_PKG = "com.oculus.magicislandcastingservice";
 const RELEASE_APK = "com.oculus.magicislandcastingservice.release.apk";
-const DEBUG_APK = "com.oculus.magicislandcastingservice.debug.apk";
 const APK_DIR = join(homedir(), ".local", "share", "quest-dev");
 const RELEASE_APK_PATH = join(APK_DIR, RELEASE_APK);
-const DEBUG_APK_PATH = join(APK_DIR, DEBUG_APK);
 
-/** Path inside the NSIS-extracted MQDH where the APKs live */
-const CASTING_RES_REL = "resources/bin/Casting/Resources/";
+/** APK location inside the macOS .app bundle */
+const MACOS_APP_REL = "Contents/Resources/bin/Casting/Resources/";
+
+/** APK location inside the Windows NSIS-extracted MQDH */
+const WINDOWS_RES_REL = "resources/bin/Casting/Resources/";
+
+/** Default macOS install location */
+const MACOS_DEFAULT_APP = "/Applications/Meta Quest Developer Hub.app";
 
 /**
- * Extract casting APKs from a MQDH installer (.exe.zip, .exe, or pre-extracted dir).
- * Extracts both release and debug variants.
+ * Try to find MQDH on this machine without user input.
+ * Returns the path if found, null otherwise.
+ */
+export function findInstalledMqdh(): string | null {
+  if (platform() === "darwin") {
+    if (existsSync(MACOS_DEFAULT_APP)) {
+      return MACOS_DEFAULT_APP;
+    }
+    const userApps = join(homedir(), "Applications", "Meta Quest Developer Hub.app");
+    if (existsSync(userApps)) {
+      return userApps;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract the casting APK from a MQDH source.
+ *
+ * Accepts:
+ *   - macOS .app bundle (e.g. /Applications/Meta Quest Developer Hub.app)
+ *   - macOS .dmg disk image
+ *   - Windows .exe.zip or .exe (requires 7z)
+ *   - Any directory containing the APK file
  */
 export async function extractCastingApk(source: string): Promise<string> {
   mkdirSync(APK_DIR, { recursive: true });
@@ -37,9 +63,15 @@ export async function extractCastingApk(source: string): Promise<string> {
   const stat = statSync(source);
   let searchDir: string;
 
-  if (stat.isDirectory()) {
+  if (stat.isDirectory() && source.endsWith(".app")) {
     searchDir = source;
+    verbose(`Using macOS .app bundle: ${source}`);
+  } else if (stat.isDirectory()) {
+    searchDir = source;
+  } else if (source.endsWith(".dmg")) {
+    searchDir = await extractDmg(source);
   } else if (source.endsWith(".zip")) {
+    require7z();
     const tmpZip = join(APK_DIR, "mqdh-zip-tmp");
     rmSync(tmpZip, { recursive: true, force: true });
     execFileSync("7z", ["x", `-o${tmpZip}`, source, "-y"], { stdio: "pipe" });
@@ -50,48 +82,94 @@ export async function extractCastingApk(source: string): Promise<string> {
     searchDir = extractNsis(join(tmpZip, exe));
     rmSync(tmpZip, { recursive: true, force: true });
   } else if (source.endsWith(".exe")) {
+    require7z();
     searchDir = extractNsis(source);
   } else {
     throw new Error(
-      "Unsupported file type. Provide a MQDH .exe.zip, .exe, or extracted directory.",
+      `Unsupported file type: ${source}\n` +
+      `Supported formats: .app (macOS), .dmg (macOS), .exe.zip (Windows), .exe (Windows), or a directory`,
     );
   }
 
-  // Extract both APK variants
-  let found = 0;
-  for (const [filename, destPath] of [
-    [RELEASE_APK, RELEASE_APK_PATH],
-    [DEBUG_APK, DEBUG_APK_PATH],
-  ] as const) {
-    const knownPath = join(searchDir, CASTING_RES_REL, filename);
-    if (existsSync(knownPath)) {
-      copyFileSync(knownPath, destPath);
-      found++;
-    } else {
-      const foundPath = findFile(searchDir, filename);
-      if (foundPath) {
-        copyFileSync(foundPath, destPath);
-        found++;
-      }
-    }
-  }
-
-  if (found === 0) {
+  // Try known paths first, then fall back to recursive search
+  if (!copyApk(searchDir, [MACOS_APP_REL, WINDOWS_RES_REL])) {
     throw new Error(
-      "Could not find casting APKs in extracted MQDH. Is this the right installer?",
+      "Could not find casting APK. Is this the right MQDH installation?",
     );
   }
 
   // Cleanup temp extraction dirs
-  rmSync(join(APK_DIR, "mqdh-app-tmp"), { recursive: true, force: true });
-
-  const variants = [
-    existsSync(RELEASE_APK_PATH) ? "release" : null,
-    existsSync(DEBUG_APK_PATH) ? "debug" : null,
-  ].filter(Boolean);
-  console.log(`Extracted casting APKs (${variants.join(", ")})`);
+  for (const tmp of ["mqdh-app-tmp", "mqdh-nsis-tmp", "mqdh-zip-tmp", "mqdh-dmg-tmp"]) {
+    rmSync(join(APK_DIR, tmp), { recursive: true, force: true });
+  }
 
   return APK_DIR;
+}
+
+/**
+ * Copy the release APK from a search directory, trying known relative paths
+ * first, then falling back to recursive search.
+ */
+function copyApk(searchDir: string, knownPaths: string[]): boolean {
+  // Try known paths first
+  for (const relPath of knownPaths) {
+    const candidate = join(searchDir, relPath, RELEASE_APK);
+    if (existsSync(candidate)) {
+      copyFileSync(candidate, RELEASE_APK_PATH);
+      return true;
+    }
+  }
+  // Fall back to recursive search
+  const found = findFile(searchDir, RELEASE_APK);
+  if (found) {
+    copyFileSync(found, RELEASE_APK_PATH);
+    return true;
+  }
+  return false;
+}
+
+/** Mount a .dmg and extract APKs from the .app inside */
+async function extractDmg(dmgPath: string): Promise<string> {
+  if (platform() !== "darwin") {
+    throw new Error(
+      ".dmg files can only be opened on macOS. On other platforms, mount the DMG and point to the .app inside.",
+    );
+  }
+
+  const mountPoint = join(APK_DIR, "mqdh-dmg-tmp");
+  rmSync(mountPoint, { recursive: true, force: true });
+  mkdirSync(mountPoint, { recursive: true });
+
+  try {
+    execFileSync("hdiutil", ["attach", dmgPath, "-mountpoint", mountPoint, "-nobrowse", "-quiet"], {
+      stdio: "pipe",
+    });
+  } catch (e) {
+    throw new Error(`Failed to mount DMG: ${(e as Error).message}`);
+  }
+
+  try {
+    const entries = readdirSync(mountPoint);
+    const app = entries.find((e) => e.endsWith(".app"));
+    if (!app) {
+      throw new Error("No .app found inside DMG");
+    }
+    return join(mountPoint, app);
+  } catch (e) {
+    try { execFileSync("hdiutil", ["detach", mountPoint, "-quiet"], { stdio: "pipe" }); } catch {}
+    throw e;
+  }
+}
+
+function require7z(): void {
+  try {
+    execFileSync("7z", ["--help"], { stdio: "pipe" });
+  } catch {
+    throw new Error(
+      "7z is required to extract Windows MQDH installers.\n" +
+      "Install it with: sudo apt install p7zip-full (Linux) or brew install p7zip (macOS)",
+    );
+  }
 }
 
 function extractNsis(exePath: string): string {
@@ -129,9 +207,9 @@ function findFile(dir: string, name: string): string | null {
   return null;
 }
 
-/** Check whether any casting APK variant has been extracted locally */
+/** Check whether the casting APK has been extracted locally */
 export function hasCastingApk(): boolean {
-  return existsSync(RELEASE_APK_PATH) || existsSync(DEBUG_APK_PATH);
+  return existsSync(RELEASE_APK_PATH);
 }
 
 /** Check if casting service is installed on the connected Quest device */
@@ -148,65 +226,25 @@ export async function isCastingInstalled(device: string): Promise<boolean> {
 
 /**
  * Install the casting APK onto the Quest device.
- * Tries release APK first (works on Quest 2 with system app),
- * falls back to debug APK (works on Quest 3/3S without system app).
+ *
+ * Uses the release APK which matches the system app's signing certificate.
+ * This installs as UPDATED_SYSTEM_APP, preserving privileged permissions.
  */
 export async function installCastingApk(device: string): Promise<void> {
   if (!hasCastingApk()) {
     throw new Error(
-      `Casting APK not found. Run: quest-dev setup-cast <path-to-mqdh-installer>`,
+      `Casting APK not found. Run: quest-dev setup-cast`,
     );
   }
 
-  // On Quest 2, the casting service is a system app. The system version's
-  // signature only matches the release APK. On Quest 3, there's no system
-  // version, so either APK works — but we must uninstall for user 0 first
-  // if the system version was previously disabled.
-  //
-  // Strategy: try release first, fall back to debug.
-  const apksToTry: [string, string][] = [];
-  if (existsSync(RELEASE_APK_PATH)) {
-    apksToTry.push(["release", RELEASE_APK_PATH]);
+  try {
+    await execCommand("adb", ["-s", device, "install", "-r", "-g", RELEASE_APK_PATH]);
+  } catch (error) {
+    throw new Error(
+      `Failed to install casting APK: ${(error as Error).message}\n` +
+      `Try installing manually: adb -s ${device} install -r -g ${RELEASE_APK_PATH}`,
+    );
   }
-  if (existsSync(DEBUG_APK_PATH)) {
-    apksToTry.push(["debug", DEBUG_APK_PATH]);
-  }
-
-  for (const [variant, path] of apksToTry) {
-    try {
-      verbose(`Trying ${variant} APK: ${path}`);
-      await execCommand("adb", ["-s", device, "install", "-r", "-g", path]);
-      verbose(`Installed ${variant} casting APK`);
-      return;
-    } catch (error) {
-      verbose(`${variant} APK install failed: ${(error as Error).message}`);
-      // If signature mismatch and this is a system app, try uninstalling
-      // for the current user first to clear the system version
-      if ((error as Error).message.includes("INSTALL_FAILED_UPDATE_INCOMPATIBLE")) {
-        try {
-          verbose("Uninstalling system version for current user...");
-          await execCommand("adb", [
-            "-s", device, "shell", "pm", "uninstall", "-k", "--user", "0", CASTING_PKG,
-          ]);
-          // Retry this variant
-          try {
-            await execCommand("adb", ["-s", device, "install", "-r", "-g", path]);
-            verbose(`Installed ${variant} casting APK (after user uninstall)`);
-            return;
-          } catch {
-            verbose(`${variant} APK still failed after user uninstall`);
-          }
-        } catch {
-          verbose("User uninstall failed");
-        }
-      }
-    }
-  }
-
-  throw new Error(
-    "Failed to install casting APK. Try installing manually:\n" +
-    `  adb -s ${device} install -r ${RELEASE_APK_PATH}`,
-  );
 }
 
 /** Ensure casting service is installed, installing if needed. */
@@ -215,12 +253,21 @@ export async function ensureCastingInstalled(device: string): Promise<boolean> {
     verbose("Casting service already installed");
     return false;
   }
+
+  // If we don't have the APK locally, try to find MQDH on this machine
   if (!hasCastingApk()) {
-    throw new Error(
-      `Casting service not installed on Quest and APK not found locally.\n` +
-      `Download Meta Quest Developer Hub from https://developer.oculus.com/meta-quest-developer-hub\n` +
-      `Then run: quest-dev setup-cast <path-to-mqdh-installer.exe.zip>`,
-    );
+    const mqdh = findInstalledMqdh();
+    if (mqdh) {
+      console.log(`Found MQDH at ${mqdh}, extracting casting APK...`);
+      await extractCastingApk(mqdh);
+    } else {
+      throw new Error(
+        `Casting service not installed on Quest and APK not found locally.\n\n` +
+        `To fix this, run:\n\n` +
+        `  quest-dev setup-cast\n\n` +
+        `This will guide you through downloading and extracting the casting APK.`,
+      );
+    }
   }
   console.log("Installing casting service on Quest...");
   await installCastingApk(device);

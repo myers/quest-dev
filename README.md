@@ -23,6 +23,33 @@ npm install -g @myerscarpenter/quest-dev
   npm install -g @myerscarpenter/cdp-cli
   ```
 
+## Casting Setup
+
+quest-dev can cast your Quest's screen to your computer. This requires a casting APK that ships inside Meta Quest Developer Hub (MQDH).
+
+**One-time setup:**
+
+```bash
+quest-dev setup-cast
+```
+
+On macOS, this auto-detects MQDH if it's installed in `/Applications`. Otherwise, download MQDH first and point to it:
+
+```bash
+# macOS — .app bundle (easiest)
+quest-dev setup-cast "/Applications/Meta Quest Developer Hub.app"
+
+# macOS — .dmg download
+quest-dev setup-cast ~/Downloads/MetaQuestDeveloperHub.dmg
+
+# Windows/Linux — .exe.zip download (requires 7z)
+quest-dev setup-cast ~/Downloads/Meta-Quest-Developer-Hub.exe.zip
+```
+
+Download MQDH from: https://developer.oculus.com/meta-quest-developer-hub
+
+The APK is extracted once and cached at `~/.local/share/quest-dev/`. When you start casting, it's auto-installed on your Quest if needed.
+
 ## Usage
 
 ### Screenshot

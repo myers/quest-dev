@@ -11,7 +11,7 @@
 import { checkADBPath, getBatteryInfo, formatBatteryInfo } from '../utils/adb.js';
 import { loadPin, loadConfig } from '../utils/config.js';
 import { execCommand } from '../utils/exec.js';
-import { execSync, spawn, ChildProcess } from 'child_process';
+import { execFileSync, spawn, ChildProcess } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import {
@@ -70,7 +70,7 @@ export async function stayAwakeWatchdog(parentPid: number, pin: string): Promise
 
       try {
         const args = buildSetPropertyArgs(pin, false);
-        execSync(`adb ${args.join(' ')}`, { stdio: 'ignore' });
+        execFileSync('adb', args, { stdio: 'ignore' });
 
         const pidFile = `${os.homedir()}/.quest-dev-stay-awake.pid`;
         try { fs.unlinkSync(pidFile); } catch {}
@@ -220,7 +220,7 @@ export async function stayAwakeCommand(
       try { fs.unlinkSync(pidFilePath); } catch {}
 
       const args = buildSetPropertyArgs(pin, false);
-      execSync(`adb ${args.join(' ')}`, { stdio: 'ignore' });
+      execFileSync('adb', args, { stdio: 'ignore' });
       console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
     } catch (error) {
       console.error('Failed to restore settings:', (error as Error).message);

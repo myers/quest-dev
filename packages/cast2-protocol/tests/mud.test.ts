@@ -140,7 +140,7 @@ describe("MUD builders", () => {
       verifySubHeader(payload, SUB_MAGIC, 0);
       expect(readCmd(payload)).toBe(CMD_POSE);
       const off = MGIK_SUB_HEADER_SIZE + 4;
-      // Wire order: type(0), posX, posY, posZ, qw, qx, qy, qz, unused
+      // Wire order: type(0), posX, posY, posZ, qw, qx, qy, qz
       expect(payload.readFloatBE(off)).toBeCloseTo(0.0); // type
       expect(payload.readFloatBE(off + 4)).toBeCloseTo(1.0); // x
       expect(payload.readFloatBE(off + 8)).toBeCloseTo(2.0); // y
@@ -149,7 +149,8 @@ describe("MUD builders", () => {
       expect(payload.readFloatBE(off + 20)).toBeCloseTo(0.0); // qx
       expect(payload.readFloatBE(off + 24)).toBeCloseTo(0.0); // qy
       expect(payload.readFloatBE(off + 28)).toBeCloseTo(0.0); // qz
-      expect(payload.readFloatBE(off + 32)).toBeCloseTo(0.0); // unused
+      // Total: sub_header(24) + cmd(4) + 8 floats(32) = 60 bytes
+      expect(payload.length).toBe(MGIK_SUB_HEADER_SIZE + 36);
     });
   });
 

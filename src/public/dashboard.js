@@ -12,6 +12,11 @@ async function api(method, path, body) {
     opts.body = JSON.stringify(body);
   }
   const r = await fetch(path, opts);
+  if (!r.ok) {
+    let msg;
+    try { const j = await r.json(); msg = j.error ?? r.statusText; } catch { msg = r.statusText; }
+    throw new Error(`HTTP ${r.status}: ${msg}`);
+  }
   return r.json();
 }
 
@@ -58,6 +63,7 @@ function App() {
   // Double-buffered frame refresh: fetch next frame while current displays
   const imgRef = useRef(null);
   useEffect(() => {
+    if (!active) return;
     let run = true;
     // Two offscreen buffers, alternating
     const buf = [new Image(), new Image()];
@@ -69,7 +75,6 @@ function App() {
       img.onload = () => {
         if (!run) return;
         if (imgRef.current) imgRef.current.src = img.src;
-        // Immediately start loading the next frame
         requestAnimationFrame(fetch_next);
       };
       img.onerror = () => { if (run) setTimeout(fetch_next, 500); };
@@ -77,7 +82,7 @@ function App() {
     }
     fetch_next();
     return () => { run = false; };
-  }, []);
+  }, [active]);
 
   // Keyboard + mouse (imperative)
   const overlayRef = useRef(null);
@@ -105,7 +110,7 @@ function App() {
       if (keysDown.has("i")) pit += l;
       if (keysDown.has("k")) pit -= l;
       if (fwd || str || yaw || pit || up)
-        api("POST", "/cast/pose", { dz: fwd, dx: str, dy: up, d_yaw: yaw, d_pitch: pit });
+        api("POST", "/cast/pose", { dz: fwd, dx: str, dy: up, d_yaw: yaw, d_pitch: pit }).catch((e) => showToast(e.message));
       setTimeout(tick, 80);
     }
 
@@ -127,7 +132,7 @@ function App() {
       dx0 = e.clientX; dy0 = e.clientY;
       const sn = look();
       const yaw = dx * sn * 0.02, pitch = dy * sn * 0.02;
-      if (yaw || pitch) api("POST", "/cast/pose", { d_yaw: yaw, d_pitch: pitch });
+      if (yaw || pitch) api("POST", "/cast/pose", { d_yaw: yaw, d_pitch: pitch }).catch((e) => showToast(e.message));
     };
     const mu = () => { dragging = false; if (crosshairRef.current) crosshairRef.current.style.display = "none"; };
     const ctx = (e) => { e.preventDefault(); doClick(); };
@@ -148,7 +153,10 @@ function App() {
   }, []);
 
   // Actions
-  const doClick = async () => { const r = await api("POST", "/cast/click"); if (r?.ok) showToast("Click sent"); };
+  const doClick = async () => {
+    try { const r = await api("POST", "/cast/click"); if (r?.ok) showToast("Click sent"); }
+    catch (e) { showToast("Click failed: " + e.message); }
+  };
   const doScreenshot = () => {
     const a = document.createElement("a");
     a.href = "/cast/screenshot";
@@ -157,8 +165,8 @@ function App() {
     showToast("Screenshot saved");
   };
   const doResetPose = async () => {
-    await api("POST", "/cast/reset-view");
-    showToast("Back to HMD view");
+    try { await api("POST", "/cast/reset-view"); showToast("Back to HMD view"); }
+    catch (e) { showToast("Reset failed: " + e.message); }
   };
 
   // Derive display state from server

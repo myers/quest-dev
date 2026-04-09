@@ -121,10 +121,10 @@ export function buildShortAck(
 /** Build Pose command (0xCE) payload. */
 export function buildPose(subMagic: number, seq: number, pose: PoseState): Buffer {
   const sub = packMgikSub(subMagic, seq);
-  // cmd(4) + 9 floats (36 bytes) = 40 bytes
-  const body = Buffer.alloc(40);
+  // cmd(4) + 8 floats (32 bytes) = 36 bytes
+  const body = Buffer.alloc(36);
   body.writeUInt32BE(CMD_POSE, 0);
-  // Wire order: type(0), posX, posY, posZ, qw, qx, qy, qz, unused(0)
+  // Wire order: type(0), posX, posY, posZ, qw, qx, qy, qz
   body.writeFloatBE(0.0, 4);
   body.writeFloatBE(pose.x, 8);
   body.writeFloatBE(pose.y, 12);
@@ -133,7 +133,6 @@ export function buildPose(subMagic: number, seq: number, pose: PoseState): Buffe
   body.writeFloatBE(pose.qx, 24);
   body.writeFloatBE(pose.qy, 28);
   body.writeFloatBE(pose.qz, 32);
-  body.writeFloatBE(0.0, 36);
   return Buffer.concat([sub, body]);
 }
 

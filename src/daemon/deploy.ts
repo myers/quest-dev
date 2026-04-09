@@ -162,16 +162,21 @@ export async function deploy(
   await new Promise((r) => setTimeout(r, crashWaitMs));
 
   // Check for crash in logcat
-  const { crashed, lines } = logcat.scanForCrash();
+  const { crashed, lines, reason, matchedLine, matchedPattern } = logcat.scanForCrash();
 
   if (crashed) {
-    console.log(`CRASH DETECTED in ${packageName}`);
+    const detail = [
+      `Crash reason: ${reason ?? "unknown"}`,
+      `Matched pattern: /${matchedPattern}/`,
+      `Triggered by line: ${matchedLine}`,
+    ].join("\n");
     return {
       ok: false,
       package: packageName,
       crashed: true,
       logcatLines: lines,
       logcatFile,
+      error: detail,
     };
   }
 
@@ -181,7 +186,8 @@ export async function deploy(
     "pidof",
     packageName,
   ));
-  const processAlive = psResult.code === 0 && psResult.stdout.trim().length > 0;
+  const pid = psResult.stdout.trim();
+  const processAlive = psResult.code === 0 && pid.length > 0;
 
   if (!processAlive) {
     // Process died without obvious crash pattern
@@ -192,7 +198,7 @@ export async function deploy(
       crashed: true,
       logcatLines: tail,
       logcatFile,
-      error: "Process exited (no crash pattern detected but process not running)",
+      error: `Process not running (pidof exit=${psResult.code}, stdout="${pid}", stderr="${psResult.stderr.trim()}")`,
     };
   }
 
