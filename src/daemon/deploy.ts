@@ -162,7 +162,7 @@ export async function deploy(
   await new Promise((r) => setTimeout(r, crashWaitMs));
 
   // Check for crash in logcat
-  const { crashed, lines, reason, matchedLine, matchedPattern } = logcat.scanForCrash();
+  const { crashed, lines, reason, matchedLine, matchedPattern } = logcat.scanForCrash(200, packageName);
 
   if (crashed) {
     const detail = [

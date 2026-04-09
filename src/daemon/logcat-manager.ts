@@ -154,18 +154,28 @@ export class LogcatManager {
     }
   }
 
-  /** Scan tail for crash patterns */
-  scanForCrash(lineCount: number = 200): { crashed: boolean; lines: string[]; reason?: string; matchedLine?: string; matchedPattern?: string } {
+  /** Scan tail for crash patterns, optionally scoped to a package name */
+  scanForCrash(lineCount: number = 200, packageName?: string): { crashed: boolean; lines: string[]; reason?: string; matchedLine?: string; matchedPattern?: string } {
     const tail = this.readTail(lineCount);
+
+    // Patterns that are app-specific (only match if they mention our package)
+    const pkgEscaped = packageName ? packageName.replace(/\./g, "\\.") : null;
     const crashPatterns: Array<{ pattern: RegExp; label: string }> = [
       { pattern: /FATAL EXCEPTION/i,          label: "FATAL EXCEPTION" },
       { pattern: /panicked at/i,              label: "Rust panic" },
-      { pattern: /backtrace:/i,               label: "backtrace" },
       { pattern: /signal \d+ \(SIG/i,         label: "signal/crash" },
       { pattern: /Native crash/i,             label: "native crash" },
-      { pattern: /ANR in/i,                   label: "ANR (not responding)" },
-      { pattern: /Process .+ has died/i,      label: "process died" },
-      { pattern: /Force finishing activity/i,  label: "force finishing activity" },
+      // These patterns are scoped to our package to avoid false positives
+      // from other processes dying (e.g. com.oculus.assistant)
+      ...(pkgEscaped ? [
+        { pattern: new RegExp(`ANR in ${pkgEscaped}`, "i"), label: "ANR (not responding)" },
+        { pattern: new RegExp(`Process ${pkgEscaped}.* has died`, "i"), label: "process died" },
+        { pattern: new RegExp(`Force finishing activity.*${pkgEscaped}`, "i"), label: "force finishing activity" },
+      ] : [
+        { pattern: /ANR in/i,                   label: "ANR (not responding)" },
+        { pattern: /Process .+ has died/i,      label: "process died" },
+        { pattern: /Force finishing activity/i,  label: "force finishing activity" },
+      ]),
     ];
 
     for (const line of tail) {
