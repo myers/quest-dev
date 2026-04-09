@@ -1,6 +1,6 @@
 /**
  * Config file loading for quest-dev
- * Resolves settings from CLI flags → .quest-dev.json → ~/.config/quest-dev/config.json
+ * Resolves settings from CLI flags → ~/.config/quest-dev/config.json
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -15,38 +15,18 @@ export interface QuestDevConfig {
   lowBattery?: number;
 }
 
-const CONFIG_LOCATIONS = [
-  join(process.cwd(), '.quest-dev.json'),
-  join(homedir(), '.config', 'quest-dev', 'config.json'),
-];
-
-function tryReadConfig(path: string): QuestDevConfig | null {
-  try {
-    const content = readFileSync(path, 'utf-8');
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
-}
+const CONFIG_PATH = join(homedir(), '.config', 'quest-dev', 'config.json');
 
 /**
- * Load merged config from all config file locations.
- * First file found wins for each field.
+ * Load config from ~/.config/quest-dev/config.json
  */
 export function loadConfig(): QuestDevConfig {
-  const merged: QuestDevConfig = {};
-
-  for (const path of CONFIG_LOCATIONS) {
-    const config = tryReadConfig(path);
-    if (!config) continue;
-    if (merged.pin === undefined && config.pin) merged.pin = config.pin;
-    if (merged.port === undefined && config.port !== undefined) merged.port = config.port;
-    if (merged.device === undefined && config.device) merged.device = config.device;
-    if (merged.idleTimeout === undefined && config.idleTimeout !== undefined) merged.idleTimeout = config.idleTimeout;
-    if (merged.lowBattery === undefined && config.lowBattery !== undefined) merged.lowBattery = config.lowBattery;
+  try {
+    const content = readFileSync(CONFIG_PATH, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return {};
   }
-
-  return merged;
 }
 
 /**
@@ -54,13 +34,7 @@ export function loadConfig(): QuestDevConfig {
  * Merges with existing config (doesn't overwrite unrelated fields).
  */
 export function saveConfig(values: QuestDevConfig): string {
-  const configPath = join(homedir(), '.config', 'quest-dev', 'config.json');
-  let existing: QuestDevConfig = {};
-  try {
-    existing = JSON.parse(readFileSync(configPath, 'utf-8'));
-  } catch {
-    // No existing config, start fresh
-  }
+  const existing = loadConfig();
 
   const merged = { ...existing };
   if (values.pin !== undefined) merged.pin = values.pin;
@@ -69,9 +43,9 @@ export function saveConfig(values: QuestDevConfig): string {
   if (values.idleTimeout !== undefined) merged.idleTimeout = values.idleTimeout;
   if (values.lowBattery !== undefined) merged.lowBattery = values.lowBattery;
 
-  mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, JSON.stringify(merged, null, 2) + '\n');
-  return configPath;
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+  writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2) + '\n');
+  return CONFIG_PATH;
 }
 
 /**
