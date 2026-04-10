@@ -5,7 +5,9 @@
 
 import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { execCommand, execCommandFull, execCommandStreaming } from "../utils/exec.js";
+import type { ExecResult } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs } from "../utils/adb.js";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
@@ -51,6 +53,71 @@ async function extractPackageName(apkPath: string): Promise<string> {
       "Cannot extract package name from APK. Install aapt2 (Android build-tools) or adbkit-apkreader.",
     );
   }
+}
+
+/**
+ * Install APK with progress reporting for incremental installs.
+ * When .idsig exists, uses ADB_TRACE=incremental to parse block transfer progress.
+ */
+async function installWithProgress(
+  absPath: string,
+  adbArgsList: string[],
+  hasIdsig: boolean,
+): Promise<ExecResult> {
+  if (!hasIdsig) {
+    return execCommandFull("adb", adbArgsList);
+  }
+
+  return new Promise((resolve) => {
+    const env = { ...process.env, ADB_TRACE: "incremental" };
+    const proc = spawn("adb", adbArgsList, { stdio: "pipe", env });
+
+    let stdout = "";
+    let stderr = "";
+    let totalBlocks = 0;
+    let lastReported = 0;
+    let blocksTransferred = 0;
+
+    if (proc.stdout) {
+      proc.stdout.on("data", (data) => {
+        stdout += data.toString();
+      });
+    }
+
+    if (proc.stderr) {
+      proc.stderr.on("data", (data) => {
+        const chunk = data.toString();
+        stderr += chunk;
+
+        // Parse incremental progress: "in priority: 37904 of 52096"
+        const matches = chunk.matchAll(/in priority: (\d+) of (\d+)/g);
+        for (const match of matches) {
+          const current = parseInt(match[1], 10);
+          totalBlocks = parseInt(match[2], 10);
+          blocksTransferred++;
+
+          // Report every 10% or every 5000 blocks
+          if (totalBlocks > 0 && current - lastReported >= totalBlocks * 0.1) {
+            const pct = Math.round((current / totalBlocks) * 100);
+            process.stdout.write(`\r  Streaming: ${current}/${totalBlocks} blocks (${pct}%)`);
+            lastReported = current;
+          }
+        }
+      });
+    }
+
+    proc.on("close", (code) => {
+      if (totalBlocks > 0) {
+        const kbTransferred = Math.round((blocksTransferred * 4096) / 1024);
+        console.log(`\r  Transferred: ${blocksTransferred} blocks (~${kbTransferred}KB)`);
+      }
+      resolve({ stdout, stderr, code: code ?? 1 });
+    });
+
+    proc.on("error", (err) => {
+      resolve({ stdout, stderr: err.message, code: 1 });
+    });
+  });
 }
 
 /**
@@ -111,9 +178,14 @@ export async function deploy(
 
   // Install APK
   const apkSizeMB = (statSync(absPath).size / 1_048_576).toFixed(1);
-  console.log(`Installing APK (${apkSizeMB} MB)...`);
+  const hasIdsig = existsSync(`${absPath}.idsig`);
+  console.log(`Installing APK (${apkSizeMB} MB)${hasIdsig ? " [incremental]" : ""}...`);
   const installStart = Date.now();
-  const installResult = await execCommandFull("adb", adbArgs("install", "-r", absPath));
+  const installResult = await installWithProgress(
+    absPath,
+    adbArgs("install", "-r", absPath),
+    hasIdsig,
+  );
   const installSecs = ((Date.now() - installStart) / 1000).toFixed(1);
   verbose("Install stdout:", installResult.stdout.trim());
   verbose("Install stderr:", installResult.stderr.trim());
