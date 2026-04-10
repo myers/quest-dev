@@ -331,10 +331,28 @@ cli.command(
       logcatLines?: string[];
       logcatFile?: string;
       error?: string;
+      install?: {
+        incremental: boolean;
+        blocksTransferred?: number;
+        totalBlocks?: number;
+        bytesTransferred?: number;
+        installSecs: number;
+        apkSizeMB: number;
+      };
     };
 
     if (result.ok) {
-      console.log(`\nDeploy successful: ${result.package} is running`);
+      const inst = result.install;
+      if (inst) {
+        const mode = inst.incremental ? 'incremental' : 'full';
+        if (inst.blocksTransferred !== undefined && inst.totalBlocks) {
+          const kb = Math.round((inst.bytesTransferred ?? 0) / 1024);
+          console.log(`\nInstalled (${mode}, ${inst.installSecs}s): ${inst.blocksTransferred}/${inst.totalBlocks} blocks (~${kb}KB of ${inst.apkSizeMB}MB)`);
+        } else {
+          console.log(`\nInstalled (${mode}, ${inst.installSecs}s)`);
+        }
+      }
+      console.log(`Deploy successful: ${result.package} is running`);
       console.log(`Logcat: ${result.logcatFile}`);
       console.log(`Daemon API: http://127.0.0.1:${info.port}/help`);
     } else if (result.crashed) {

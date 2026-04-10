@@ -19,8 +19,17 @@ export interface DeployOptions {
   pin?: string;
 }
 
+export interface InstallInfo {
+  incremental: boolean;
+  blocksTransferred?: number;
+  totalBlocks?: number;
+  bytesTransferred?: number;
+  installSecs: number;
+  apkSizeMB: number;
+}
+
 export type DeployResult =
-  | { ok: true;  package: string; crashed: false; logcatFile: string }
+  | { ok: true;  package: string; crashed: false; logcatFile: string; install?: InstallInfo }
   | { ok: false; package: string; crashed: true;  logcatFile: string; logcatLines?: string[]; error?: string }
   | { ok: false; package: string; crashed: false; error: string; logcatFile?: string };
 
@@ -59,13 +68,19 @@ async function extractPackageName(apkPath: string): Promise<string> {
  * Install APK with progress reporting for incremental installs.
  * When .idsig exists, uses ADB_TRACE=incremental to parse block transfer progress.
  */
+interface InstallResult extends ExecResult {
+  blocksTransferred: number;
+  totalBlocks: number;
+}
+
 async function installWithProgress(
   absPath: string,
   adbArgsList: string[],
   hasIdsig: boolean,
-): Promise<ExecResult> {
+): Promise<InstallResult> {
   if (!hasIdsig) {
-    return execCommandFull("adb", adbArgsList);
+    const result = await execCommandFull("adb", adbArgsList);
+    return { ...result, blocksTransferred: 0, totalBlocks: 0 };
   }
 
   return new Promise((resolve) => {
@@ -111,11 +126,11 @@ async function installWithProgress(
         const kbTransferred = Math.round((blocksTransferred * 4096) / 1024);
         console.log(`\r  Transferred: ${blocksTransferred} blocks (~${kbTransferred}KB)`);
       }
-      resolve({ stdout, stderr, code: code ?? 1 });
+      resolve({ stdout, stderr, code: code ?? 1, blocksTransferred, totalBlocks });
     });
 
     proc.on("error", (err) => {
-      resolve({ stdout, stderr: err.message, code: 1 });
+      resolve({ stdout, stderr: err.message, code: 1, blocksTransferred: 0, totalBlocks: 0 });
     });
   });
 }
@@ -200,6 +215,17 @@ export async function deploy(
       error: `Install failed (exit ${installResult.code}):\n${detail}`,
     };
   }
+  const apkSizeNum = parseFloat(apkSizeMB);
+  const installInfo: InstallInfo = {
+    incremental: hasIdsig,
+    installSecs: parseFloat(installSecs),
+    apkSizeMB: apkSizeNum,
+    ...(installResult.totalBlocks > 0 ? {
+      blocksTransferred: installResult.blocksTransferred,
+      totalBlocks: installResult.totalBlocks,
+      bytesTransferred: installResult.blocksTransferred * 4096,
+    } : {}),
+  };
   console.log(`APK installed (${installSecs}s)`);
 
   // Start logcat capture (clears buffer first)
@@ -277,5 +303,5 @@ export async function deploy(
   }
 
   console.log(`Deploy successful: ${packageName} is running`);
-  return { ok: true, package: packageName, crashed: false, logcatFile };
+  return { ok: true, package: packageName, crashed: false, logcatFile, install: installInfo };
 }
