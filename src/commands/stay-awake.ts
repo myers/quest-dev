@@ -8,7 +8,7 @@
  * parent is killed (TaskStop, terminal close, claude code exit).
  */
 
-import { checkADBPath, getBatteryInfo, formatBatteryInfo } from '../utils/adb.js';
+import { checkADBPath, getBatteryInfo, formatBatteryInfo, adbArgs } from '../utils/adb.js';
 import { loadPin, loadConfig } from '../utils/config.js';
 import { execCommand } from '../utils/exec.js';
 import { execFileSync, spawn, ChildProcess } from 'child_process';
@@ -30,7 +30,7 @@ export { type TestProperties, buildSetPropertyArgs, parseTestProperties };
  * Wake the Quest screen
  */
 async function wakeScreen(): Promise<void> {
-  await execCommand('adb', ['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
+  await execCommand('adb', adbArgs('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'));
 }
 
 /**
@@ -69,7 +69,7 @@ export async function stayAwakeWatchdog(parentPid: number, pin: string): Promise
       clearInterval(checkParent);
 
       try {
-        const args = buildSetPropertyArgs(pin, false);
+        const args = adbArgs(...buildSetPropertyArgs(pin, false));
         execFileSync('adb', args, { stdio: 'ignore' });
 
         const pidFile = `${os.homedir()}/.quest-dev-stay-awake.pid`;
@@ -219,7 +219,7 @@ export async function stayAwakeCommand(
     try {
       try { fs.unlinkSync(pidFilePath); } catch {}
 
-      const args = buildSetPropertyArgs(pin, false);
+      const args = adbArgs(...buildSetPropertyArgs(pin, false));
       execFileSync('adb', args, { stdio: 'ignore' });
       console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
     } catch (error) {

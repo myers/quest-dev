@@ -17,7 +17,7 @@ import { batteryCommand } from './commands/battery.js';
 import { stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
-import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, resolvePort } from './daemon/client.js';
+import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, resolvePort, resolveHost } from './daemon/client.js';
 import { startDaemon } from './daemon/daemon.js';
 import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
 
@@ -48,6 +48,11 @@ const cli = yargs(hideBin(process.argv))
   })
   .option('device', {
     describe: 'Quest IP address (or save with: quest-dev config --device)',
+    type: 'string',
+    global: true,
+  })
+  .option('host', {
+    describe: 'Daemon bind address (default: 127.0.0.1, use 0.0.0.0 for network access)',
     type: 'string',
     global: true,
   })
@@ -143,7 +148,7 @@ cli.command(
     }
 
     // Delegate to daemon
-    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
+    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
     switch (action) {
       case 'start': {
         const result = await daemonFetch(info, '/logcat/start', {
@@ -174,7 +179,7 @@ cli.command(
           console.log('Capture stopped');
           if (status.file) {
             console.log(`File: ${status.file}`);
-            if (status.size) console.log(`Size: ${status.size} (${status.lines} lines)`);
+            if (status.size) console.log(`Size: ${status.size}`);
           }
         }
         break;
@@ -191,7 +196,7 @@ cli.command(
           console.log(`Capturing (PID: ${result.pid})`);
           if (result.file) {
             console.log(`File: ${result.file}`);
-            if (result.size) console.log(`Size: ${result.size} (${result.lines} lines)`);
+            if (result.size) console.log(`Size: ${result.size}`);
           }
         } else {
           console.log('Not capturing');
@@ -224,7 +229,7 @@ cli.command(
       });
   },
   async (argv) => {
-    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
+    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
 
     // Enable stay-awake
     const result = await daemonFetch(info, '/stay-awake/enable', {
@@ -254,6 +259,15 @@ cli.command(
         describe: 'Meta Store PIN (or save with: quest-dev config --pin)',
         type: 'string',
       })
+      .option('idle-timeout', {
+        describe: 'Idle timeout in milliseconds (default: 300000 = 5 minutes, or save with: quest-dev config)',
+        type: 'number',
+        alias: 'i',
+      })
+      .option('low-battery', {
+        describe: 'Exit when battery drops to this percentage (default: 10, or save with: quest-dev config)',
+        type: 'number',
+      })
       .option('disable', {
         describe: 'Manually restore all test properties and exit',
         type: 'boolean',
@@ -263,7 +277,8 @@ cli.command(
         describe: 'Show current property values and exit',
         type: 'boolean',
         default: false,
-      });
+      })
+;
   },
   async (argv) => {
     if (argv.status) {
@@ -283,7 +298,13 @@ cli.command(
     }
 
     // Enable via daemon
-    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
+    const info = await ensureDaemon({
+      port: argv.port as number | undefined,
+      device: argv.device as string | undefined,
+      host: argv.host as string | undefined,
+      idleTimeout: argv.idleTimeout as number | undefined,
+      lowBattery: argv.lowBattery as number | undefined,
+    });
     const result = await daemonFetch(info, '/stay-awake/enable', {
       body: { pin: argv.pin },
     }) as { ok: boolean; error?: string };
@@ -316,7 +337,7 @@ cli.command(
   },
   async (argv) => {
     const apkPath = resolve(argv.apk as string);
-    const info = await ensureDaemon(argv.port as number | undefined, argv.device as string | undefined);
+    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
 
     console.log(`Deploying: ${apkPath}`);
     const result = await daemonFetch(info, '/deploy', {
@@ -513,7 +534,13 @@ cli.command(
   false as any, // Hide from help
   () => {},
   async (argv) => {
-    await startDaemon(resolvePort(argv.port as number | undefined), argv.device as string | undefined);
+    await startDaemon({
+      port: resolvePort(argv.port as number | undefined),
+      device: argv.device as string | undefined,
+      host: argv.host as string | undefined,
+      idleTimeout: argv.idleTimeout as number | undefined,
+      lowBattery: argv.lowBattery as number | undefined,
+    });
   }
 );
 

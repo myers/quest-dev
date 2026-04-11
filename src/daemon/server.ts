@@ -21,6 +21,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface DaemonServerOptions {
   port: number;
+  host: string;
   stayAwake: StayAwakeManager;
   logcat: LogcatManager;
   castManager: CastManager;
@@ -31,7 +32,7 @@ export interface DaemonServerOptions {
 export async function createDaemonServer(
   options: DaemonServerOptions,
 ): Promise<FastifyInstance> {
-  const { port, stayAwake, logcat, castManager, onActivity, onShutdown } =
+  const { port, host, stayAwake, logcat, castManager, onActivity, onShutdown } =
     options;
   const config = loadConfig();
 
@@ -107,7 +108,6 @@ POST endpoints (JSON body)
         capturing: logcatStatus.capturing,
         file: logcatStatus.file,
         size: logcatStatus.size,
-        lines: logcatStatus.lines,
       },
       battery,
     };
@@ -590,6 +590,6 @@ POST endpoints (JSON body)
     },
   );
 
-  await app.listen({ port, host: "0.0.0.0" });
+  await app.listen({ port, host });
   return app;
 }

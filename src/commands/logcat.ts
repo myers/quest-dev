@@ -9,7 +9,7 @@
 import { resolve, join } from 'path';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, symlinkSync, statSync, readlinkSync, openSync, closeSync } from 'fs';
 import { spawn } from 'child_process';
-import { checkADBPath, checkADBDevices } from '../utils/adb.js';
+import { checkADBPath, checkADBDevices, adbArgs } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
 
 const LOG_DIR = resolve(process.env.LOG_DIR || 'logs/logcat');
@@ -143,7 +143,7 @@ export async function startCommand(filter?: string): Promise<void> {
 
   // Clear the buffer first - critical for Quest
   try {
-    await execCommand('adb', ['logcat', '-c']);
+    await execCommand('adb', adbArgs('logcat', '-c'));
     console.log('Ring buffer cleared.');
   } catch (error) {
     console.error('Failed to clear ring buffer:', (error as Error).message);
@@ -155,7 +155,7 @@ export async function startCommand(filter?: string): Promise<void> {
   }
 
   // Start background logcat process
-  const args = ['logcat', '-v', 'threadtime'];
+  const args = adbArgs('logcat', '-v', 'threadtime');
   if (filter) {
     args.push(filter);
   }

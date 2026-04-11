@@ -10,6 +10,7 @@ import { homedir } from 'os';
 export interface QuestDevConfig {
   pin?: string;
   port?: number;
+  host?: string;
   device?: string;
   idleTimeout?: number;
   lowBattery?: number;
@@ -39,6 +40,7 @@ export function saveConfig(values: QuestDevConfig): string {
   const merged = { ...existing };
   if (values.pin !== undefined) merged.pin = values.pin;
   if (values.port !== undefined) merged.port = values.port;
+  if (values.host !== undefined) merged.host = values.host;
   if (values.device !== undefined) merged.device = values.device;
   if (values.idleTimeout !== undefined) merged.idleTimeout = values.idleTimeout;
   if (values.lowBattery !== undefined) merged.lowBattery = values.lowBattery;

@@ -11,7 +11,7 @@ beforeEach(() => {
 });
 
 describe('loadConfig', () => {
-  it('returns empty object when no config files exist', () => {
+  it('returns empty object when no config file exists', () => {
     mockReadFileSync.mockImplementation(() => {
       throw new Error('ENOENT');
     });
@@ -20,31 +20,32 @@ describe('loadConfig', () => {
     expect(config).toEqual({});
   });
 
-  it('reads .quest-dev.json from cwd when present', () => {
+  it('reads ~/.config/quest-dev/config.json', () => {
     mockReadFileSync.mockImplementation((path) => {
-      if (String(path).endsWith('.quest-dev.json')) {
-        return JSON.stringify({ pin: '1234' });
+      if (String(path).endsWith('config.json')) {
+        return JSON.stringify({ pin: '1234', port: 8091 });
       }
       throw new Error('ENOENT');
     });
 
     const config = loadConfig();
     expect(config.pin).toBe('1234');
+    expect(config.port).toBe(8091);
   });
 
-  it('merges configs: local file wins over global file', () => {
-    mockReadFileSync.mockImplementation((path) => {
-      if (String(path).endsWith('.quest-dev.json')) {
-        return JSON.stringify({ pin: 'local-pin', idleTimeout: 5000 });
-      }
-      if (String(path).endsWith('config.json')) {
-        return JSON.stringify({ pin: 'global-pin', lowBattery: 15 });
-      }
-      throw new Error('ENOENT');
-    });
+  it('returns all config fields', () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({
+      pin: 'test-pin',
+      port: 9000,
+      device: '192.168.1.100',
+      idleTimeout: 5000,
+      lowBattery: 15,
+    }));
 
     const config = loadConfig();
-    expect(config.pin).toBe('local-pin');
+    expect(config.pin).toBe('test-pin');
+    expect(config.port).toBe(9000);
+    expect(config.device).toBe('192.168.1.100');
     expect(config.idleTimeout).toBe(5000);
     expect(config.lowBattery).toBe(15);
   });
@@ -52,18 +53,12 @@ describe('loadConfig', () => {
 
 describe('loadPin', () => {
   it('returns CLI pin when provided', () => {
-    // Should not even read config files
     const pin = loadPin('cli-pin');
     expect(pin).toBe('cli-pin');
   });
 
   it('falls back to config file pin', () => {
-    mockReadFileSync.mockImplementation((path) => {
-      if (String(path).endsWith('.quest-dev.json')) {
-        return JSON.stringify({ pin: 'config-pin' });
-      }
-      throw new Error('ENOENT');
-    });
+    mockReadFileSync.mockReturnValue(JSON.stringify({ pin: 'config-pin' }));
 
     const pin = loadPin();
     expect(pin).toBe('config-pin');

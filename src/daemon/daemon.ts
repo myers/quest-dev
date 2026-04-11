@@ -23,11 +23,21 @@ export interface DaemonInfo {
   startedAt: string;
 }
 
-export async function startDaemon(port: number, cliDevice?: string): Promise<void> {
+export interface StartDaemonOptions {
+  port: number;
+  device?: string;
+  host?: string;
+  idleTimeout?: number;
+  lowBattery?: number;
+}
+
+export async function startDaemon(opts: StartDaemonOptions): Promise<void> {
+  const { port } = opts;
   const config = loadConfig();
-  const idleTimeout = config.idleTimeout ?? 300000;
-  const lowBattery = config.lowBattery ?? 10;
-  const device = cliDevice ?? config.device;
+  const idleTimeout = opts.idleTimeout ?? config.idleTimeout ?? 300000;
+  const lowBattery = opts.lowBattery ?? config.lowBattery ?? 10;
+  const device = opts.device ?? config.device;
+  const host = opts.host ?? config.host ?? "127.0.0.1";
   if (device) {
     setAdbDevice(device);
   }
@@ -119,6 +129,7 @@ export async function startDaemon(port: number, cliDevice?: string): Promise<voi
   // Start server
   const server = await createDaemonServer({
     port,
+    host,
     stayAwake,
     logcat,
     castManager,

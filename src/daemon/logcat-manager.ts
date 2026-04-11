@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   closeSync,
+  readSync,
   statSync,
   readFileSync,
   unlinkSync,
@@ -28,7 +29,6 @@ export interface LogcatStatus {
   pid: number | null;
   file: string | null;
   size: string | null;
-  lines: number | null;
 }
 
 export class LogcatManager {
@@ -119,13 +119,11 @@ export class LogcatManager {
     const capturing = this.isCapturing;
     const file = this.currentFile;
     let size: string | null = null;
-    let lines: number | null = null;
 
     if (file && existsSync(file)) {
       const stats = this.getFileStats(file);
       if (stats) {
         size = stats.size;
-        lines = stats.lines;
       }
     }
 
@@ -134,11 +132,10 @@ export class LogcatManager {
       pid: capturing ? this.proc!.pid! : null,
       file,
       size,
-      lines,
     };
   }
 
-  /** Read tail of current logcat file */
+  /** Read tail of current logcat file (reads only the last chunk, not the entire file) */
   readTail(lineCount: number = 50): string[] {
     const file = this.currentFile;
     if (!file || !existsSync(file)) {
@@ -146,9 +143,18 @@ export class LogcatManager {
     }
 
     try {
-      const content = readFileSync(file, "utf-8");
-      const allLines = content.split("\n");
-      return allLines.slice(-lineCount);
+      const stat = statSync(file);
+      // Read ~200 bytes per line as a rough estimate for logcat lines
+      const bytesToRead = Math.min(stat.size, lineCount * 200);
+      const buffer = Buffer.alloc(bytesToRead);
+      const fd = openSync(file, "r");
+      try {
+        readSync(fd, buffer, 0, bytesToRead, Math.max(0, stat.size - bytesToRead));
+      } finally {
+        closeSync(fd);
+      }
+      const lines = buffer.toString("utf-8").split("\n");
+      return lines.slice(-lineCount);
     } catch {
       return [];
     }
@@ -201,7 +207,7 @@ export class LogcatManager {
     this.stop();
   }
 
-  private getFileStats(filePath: string): { size: string; lines: number } | null {
+  private getFileStats(filePath: string): { size: string } | null {
     try {
       const stats = statSync(filePath);
       const sizeInBytes = stats.size;
@@ -215,10 +221,7 @@ export class LogcatManager {
         sizeStr = `${(sizeInBytes / (1024 * 1024)).toFixed(1)}M`;
       }
 
-      const content = readFileSync(filePath, "utf-8");
-      const lines = content.split("\n").length;
-
-      return { size: sizeStr, lines };
+      return { size: sizeStr };
     } catch {
       return null;
     }

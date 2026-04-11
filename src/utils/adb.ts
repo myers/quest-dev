@@ -40,7 +40,7 @@ export function adbArgs(...args: string[]): string[] {
  */
 async function getBrowserPID(packageName: string): Promise<number | null> {
   try {
-    const result = await execCommandFull('adb', ['shell', 'pidof', shellEscape(packageName)]);
+    const result = await execCommandFull('adb', adbArgs('shell', 'pidof', shellEscape(packageName)));
     verbose('getBrowserPID pidof output:', result.stdout?.trim());
     if (!result.stdout?.trim()) return null;
     const pid = parseInt(result.stdout.trim().split(/\s+/)[0], 10);
@@ -65,9 +65,9 @@ async function detectCDPSocket(packageName: string): Promise<string> {
     const socketName = `chrome_devtools_remote_${pid}`;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        const result = await execCommandFull('adb', [
+        const result = await execCommandFull('adb', adbArgs(
           'shell', 'cat', '/proc/net/unix',
-        ]);
+        ));
         if (result.stdout.includes(socketName)) {
           verbose('detectCDPSocket: found PID-specific socket:', socketName, `(attempt ${attempt + 1})`);
           return socketName;
@@ -228,19 +228,19 @@ export async function ensurePortForwarding(
     const cdpPort = getCDPPortForSocket(cdpSocket);
 
     // Check reverse forwarding (Quest -> Host for dev server)
-    const reverseList = await execCommand('adb', ['reverse', '--list']);
+    const reverseList = await execCommand('adb', adbArgs('reverse', '--list'));
     const reverseExists = reverseList.includes(`tcp:${port}`);
 
     if (reverseExists) {
       console.log(`ADB reverse port forwarding already set up: Quest:${port} -> Host:${port}`);
     } else {
-      await execCommand('adb', ['reverse', `tcp:${port}`, `tcp:${port}`]);
+      await execCommand('adb', adbArgs('reverse', `tcp:${port}`, `tcp:${port}`));
       console.log(`ADB reverse port forwarding set up: Quest:${port} -> Host:${port}`);
     }
 
     // Check forward forwarding (Host -> Quest for CDP)
     // First check if ADB already has this forwarding set up
-    const forwardList = await execCommand('adb', ['forward', '--list']);
+    const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
     const forwardExists = forwardList.includes(`tcp:${cdpPort}`) && forwardList.includes(cdpSocket);
 
     if (forwardExists) {
@@ -260,7 +260,7 @@ export async function ensurePortForwarding(
         process.exit(1);
       }
 
-      await execCommand('adb', ['forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`]);
+      await execCommand('adb', adbArgs('forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`));
       console.log(`ADB forward port forwarding set up: Host:${cdpPort} -> Quest:${cdpSocket} (CDP)`);
     }
   } catch (error) {
@@ -274,7 +274,7 @@ export async function ensurePortForwarding(
  */
 export async function isBrowserRunning(browser: string = 'com.oculus.browser'): Promise<boolean> {
   try {
-    const result = await execCommandFull('adb', ['shell', 'pidof', shellEscape(browser)]);
+    const result = await execCommandFull('adb', adbArgs('shell', 'pidof', shellEscape(browser)));
     const running = result.code === 0 && result.stdout.trim().length > 0;
     verbose('isBrowserRunning:', browser, running ? 'YES' : 'NO');
     return running;
@@ -290,7 +290,7 @@ export async function isBrowserRunning(browser: string = 'com.oculus.browser'): 
 export async function launchBrowser(url: string, browser: string = 'com.oculus.browser'): Promise<boolean> {
   console.log('Launching browser...');
   try {
-    await execCommand('adb', [
+    await execCommand('adb', adbArgs(
       'shell',
       'am',
       'start',
@@ -299,7 +299,7 @@ export async function launchBrowser(url: string, browser: string = 'com.oculus.b
       '-d',
       url,
       browser
-    ]);
+    ));
     console.log(`Browser launched with URL: ${url}`);
     return true;
   } catch (error) {
@@ -328,7 +328,7 @@ export async function ensureCDPForwarding(
     const cdpPort = getCDPPortForSocket(cdpSocket);
 
     // Check forward forwarding (Host -> Quest for CDP)
-    const forwardList = await execCommand('adb', ['forward', '--list']);
+    const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
     const forwardExists = forwardList.includes(`tcp:${cdpPort}`) && forwardList.includes(cdpSocket);
 
     if (forwardExists) {
@@ -348,7 +348,7 @@ export async function ensureCDPForwarding(
         process.exit(1);
       }
 
-      await execCommand('adb', ['forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`]);
+      await execCommand('adb', adbArgs('forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`));
       console.log(`ADB forward port forwarding set up: Host:${cdpPort} -> Quest:${cdpSocket} (CDP)`);
     }
   } catch (error) {
@@ -370,7 +370,7 @@ export async function refreshCDPForwarding(
     const cdpPort = getCDPPortForSocket(cdpSocket);
 
     // Check if forwarding already points to the correct socket
-    const forwardList = await execCommand('adb', ['forward', '--list']);
+    const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
     verbose('refreshCDPForwarding: detected socket:', cdpSocket, 'port:', cdpPort);
     verbose('refreshCDPForwarding: current forwards:', forwardList.trim());
 
@@ -384,10 +384,10 @@ export async function refreshCDPForwarding(
     // Remove existing forwarding on CDP port and re-create with correct socket
     if (forwardList.includes(`tcp:${cdpPort}`)) {
       verbose('refreshCDPForwarding: removing stale forwarding on port', cdpPort);
-      await execCommandFull('adb', ['forward', '--remove', `tcp:${cdpPort}`]);
+      await execCommandFull('adb', adbArgs('forward', '--remove', `tcp:${cdpPort}`));
     }
 
-    await execCommand('adb', ['forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`]);
+    await execCommand('adb', adbArgs('forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`));
     console.log(`CDP forwarding updated: Host:${cdpPort} -> Quest:${cdpSocket}`);
   } catch (error) {
     // Non-fatal: CDP may still work with existing forwarding
