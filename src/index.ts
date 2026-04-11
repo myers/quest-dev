@@ -449,6 +449,12 @@ cli.command(
     saveConfig(values);
     console.log('Config saved:');
     console.log(JSON.stringify(values, null, 2));
+
+    // Warn if device changed while daemon is running
+    if (values.device !== undefined && discoverDaemon()) {
+      console.log('\nNote: daemon is running. Restart it to use the new device:');
+      console.log('  quest-dev stop && quest-dev start');
+    }
   }
 );
 
