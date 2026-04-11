@@ -1,0 +1,4 @@
+theme: jekyll-theme-minimal
+title: Cast 2.0 Protocol
+description: Protocol documentation for Meta Quest Cast 2.0 video streaming
+baseurl: /quest-dev
