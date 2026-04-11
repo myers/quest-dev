@@ -1,6 +1,8 @@
 node_modules/
 build/
 *.log
+*.tgz
 .DS_Store
 .quest-dev.json
 vendor/
+logs/
