@@ -6,3 +6,4 @@ build/
 .quest-dev.json
 vendor/
 logs/
+docs/superpowers/
