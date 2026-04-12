@@ -532,7 +532,11 @@ cli.command(
 cli.command(
   'daemon',
   false as any, // Hide from help
-  () => {},
+  (yargs) => {
+    return yargs
+      .option('idle-timeout', { type: 'number' })
+      .option('low-battery', { type: 'number' });
+  },
   async (argv) => {
     await startDaemon({
       port: resolvePort(argv.port as number | undefined),

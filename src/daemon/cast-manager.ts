@@ -6,7 +6,7 @@
 
 import { EventEmitter } from "node:events";
 import type { ServerResponse } from "node:http";
-import { checkADBPath } from "../utils/adb.js";
+import { checkADBPath, getAdbDevice } from "../utils/adb.js";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { CastSession } from "../cast/session.js";
@@ -116,8 +116,9 @@ export class CastManager extends EventEmitter {
       this.questIp = questIp;
 
       // Ensure casting service APK is installed on Quest
-      const device = `${questIp}:5555`;
-      await ensureCastingInstalled(device);
+      // Use the ADB device serial (USB or configured), not the WiFi IP
+      const adbDevice = getAdbDevice() ?? await this.getAdbSerial() ?? `${questIp}:5555`;
+      await ensureCastingInstalled(adbDevice);
 
       const listenPort = opts.listenPort ?? 4445;
       const { width, height } = resolveResolution(opts.resolution, opts.width, opts.height);
@@ -181,6 +182,15 @@ export class CastManager extends EventEmitter {
       }
       this.session = null;
     }
+  }
+
+  /** Get the first connected ADB device serial (e.g. USB serial or IP:port) */
+  private async getAdbSerial(): Promise<string | null> {
+    const output = await execCommand("adb", ["devices"]);
+    const lines = output.trim().split("\n").slice(1);
+    const first = lines.find((l) => l.includes("device"));
+    if (!first) return null;
+    return first.split("\t")[0].trim();
   }
 
   private async getQuestIp(): Promise<string> {
