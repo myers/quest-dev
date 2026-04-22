@@ -3,7 +3,7 @@
  * Hosts all endpoint groups: core, stay-awake, logcat, deploy, cast.
  */
 
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,13 @@ export async function createDaemonServer(
   const config = loadConfig();
 
   const app = Fastify({ logger: false });
+
+  // Return 503 with a JSON error body. Use this (instead of `return { error }`)
+  // for any "can't service the request right now" condition. Returning 200 on
+  // failure lets clients like `curl -o file.jpg` silently save the error body
+  // as an image, which has previously corrupted downstream tools.
+  const castNotActive = (reply: FastifyReply) =>
+    reply.code(503).send({ error: "cast not active" });
 
   // Static file serving for dashboard
   const publicDir = join(__dirname, "..", "public");
@@ -121,18 +128,18 @@ POST endpoints (JSON body)
 
   // --- Stay-Awake endpoints ---
 
-  app.post<{ Body: { pin?: string } }>("/stay-awake/enable", async (req) => {
+  app.post<{ Body: { pin?: string } }>("/stay-awake/enable", async (req, reply) => {
     let pin: string;
     try {
       pin = loadPin(req.body?.pin);
     } catch {
-      return { ok: false, error: "PIN required" };
+      return reply.code(400).send({ ok: false, error: "PIN required" });
     }
     try {
       await stayAwake.enable(pin);
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: (error as Error).message };
+      return reply.code(500).send({ ok: false, error: (error as Error).message });
     }
   });
 
@@ -179,8 +186,7 @@ POST endpoints (JSON body)
     async (req, reply) => {
       const { apk_path, crash_wait_ms } = req.body ?? {};
       if (!apk_path) {
-        reply.code(400);
-        return { ok: false, error: "apk_path required" };
+        return reply.code(400).send({ ok: false, error: "apk_path required" });
       }
 
       let pin: string | undefined;
@@ -220,7 +226,7 @@ POST endpoints (JSON body)
 
   app.post<{
     Body: { listen_port?: number; resolution?: string; width?: number; height?: number };
-  }>("/cast/start", async (req) => {
+  }>("/cast/start", async (req, reply) => {
     if (castManager.isActive) {
       return { ok: true, already_running: true };
     }
@@ -233,24 +239,24 @@ POST endpoints (JSON body)
       });
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: (error as Error).message };
+      return reply.code(500).send({ ok: false, error: (error as Error).message });
     }
   });
 
-  app.post("/cast/stop", async () => {
+  app.post("/cast/stop", async (_req, reply) => {
     const session = castManager.getSession();
-    if (!session?.connected) return { error: "cast not active" };
+    if (!session?.connected) return castNotActive(reply);
     await castManager.stop();
     castManager.broadcastToast("Casting stopped");
     return { ok: true };
   });
 
-  app.post("/cast/restart", async () => {
+  app.post("/cast/restart", async (_req, reply) => {
     try {
       await castManager.restart();
       return { ok: true, msg: "restarting cast session" };
     } catch (error) {
-      return { ok: false, error: (error as Error).message };
+      return reply.code(500).send({ ok: false, error: (error as Error).message });
     }
   });
 
@@ -377,9 +383,9 @@ POST endpoints (JSON body)
 
   app.post<{ Body: { pitch?: number; yaw?: number } }>(
     "/cast/rotate",
-    async (req) => {
+    async (req, reply) => {
       const session = castManager.getSession();
-      if (!session?.connected) return { error: "cast not active" };
+      if (!session?.connected) return castNotActive(reply);
       const { pitch = 0, yaw = 0 } = req.body ?? {};
       session.sendRotation(pitch, yaw);
       return { ok: true, pitch, yaw };
@@ -393,9 +399,9 @@ POST endpoints (JSON body)
       yaw?: number;
       pitch?: number;
     };
-  }>("/cast/move", async (req) => {
+  }>("/cast/move", async (req, reply) => {
     const session = castManager.getSession();
-    if (!session?.connected) return { error: "cast not active" };
+    if (!session?.connected) return castNotActive(reply);
     const { forward = 0, strafe = 0, yaw = 0, pitch = 0 } = req.body ?? {};
     session.sendRotation(pitch, yaw, forward, strafe);
     return { ok: true };
@@ -409,9 +415,9 @@ POST endpoints (JSON body)
 
   app.post<{ Body: { resolution?: string; width?: number; height?: number } }>(
     "/cast/config",
-    async (req) => {
+    async (req, reply) => {
       const session = castManager.getSession();
-      if (!session?.connected) return { error: "cast not active" };
+      if (!session?.connected) return castNotActive(reply);
       const { width, height } = resolveResolution(
         req.body?.resolution,
         req.body?.width ?? session.width,
@@ -424,9 +430,9 @@ POST endpoints (JSON body)
     },
   );
 
-  app.post<{ Body: { mode?: string } }>("/cast/eye", async (req) => {
+  app.post<{ Body: { mode?: string } }>("/cast/eye", async (req, reply) => {
     const session = castManager.getSession();
-    if (!session?.connected) return { error: "cast not active" };
+    if (!session?.connected) return castNotActive(reply);
     const mode = req.body?.mode ?? "left";
     const eyeMap: Record<string, number> = {
       left: EYE_LEFT,
@@ -434,7 +440,10 @@ POST endpoints (JSON body)
       stereo: EYE_STEREO,
       both: EYE_STEREO,
     };
-    const eye = eyeMap[mode] ?? EYE_LEFT;
+    if (!(mode in eyeMap)) {
+      return reply.code(400).send({ error: `bad mode: ${mode} (want left|right|stereo|both)` });
+    }
+    const eye = eyeMap[mode];
     session.sendDisplayConfig(session.width, session.height, eye);
     castManager.broadcastToast(`Eye mode: ${mode}`);
     castManager.broadcastStatus();
@@ -443,9 +452,9 @@ POST endpoints (JSON body)
 
   app.post<{
     Body: { x?: number; y?: number; layer?: number; hold_ms?: number };
-  }>("/cast/click", async (req) => {
+  }>("/cast/click", async (req, reply) => {
     const session = castManager.getSession();
-    if (!session?.connected) return { error: "cast not active" };
+    if (!session?.connected) return castNotActive(reply);
     const { x = 0.5, y = 0.5, layer, hold_ms = 50 } = req.body ?? {};
     await session.sendClick(x, y, layer, hold_ms);
     const layerInfo = session.layers.get(layer ?? session.layerId);
@@ -471,9 +480,9 @@ POST endpoints (JSON body)
       d_yaw?: number;
       d_pitch?: number;
     };
-  }>("/cast/pose", async (req) => {
+  }>("/cast/pose", async (req, reply) => {
     const session = castManager.getSession();
-    if (!session?.connected) return { error: "cast not active" };
+    if (!session?.connected) return castNotActive(reply);
     const data = req.body ?? {};
 
     // Direct offset from headset (not world-space) — takes priority over deltas
@@ -519,9 +528,9 @@ POST endpoints (JSON body)
       pitch?: number;
       dwell_ms?: number;
     };
-  }>("/cast/gaze", async (req) => {
+  }>("/cast/gaze", async (req, reply) => {
     const session = castManager.getSession();
-    if (!session?.connected) return { error: "cast not active" };
+    if (!session?.connected) return castNotActive(reply);
     const data = req.body ?? {};
     const action = data.action ?? "enable";
 
@@ -552,14 +561,14 @@ POST endpoints (JSON body)
       };
     }
 
-    return { error: `unknown action: ${action}` };
+    return reply.code(400).send({ error: `unknown action: ${action}` });
   });
 
   app.post<{ Body: { active?: boolean } }>(
     "/cast/pose-loop",
-    async (req) => {
+    async (req, reply) => {
       const session = castManager.getSession();
-      if (!session?.connected) return { error: "cast not active" };
+      if (!session?.connected) return castNotActive(reply);
       const active = req.body?.active ?? !session.poseLoopActive;
       if (active) {
         session.startPoseLoop();
@@ -571,16 +580,16 @@ POST endpoints (JSON body)
     },
   );
 
-  app.post("/cast/reset-view", async () => {
+  app.post("/cast/reset-view", async (_req, reply) => {
     const session = castManager.getSession();
-    if (!session?.connected) return { error: "cast not active" };
+    if (!session?.connected) return castNotActive(reply);
     session.resetView();
     castManager.broadcastToast("View reset");
     castManager.broadcastStatus();
     return { ok: true, mode: "normal" };
   });
 
-  app.post("/cast/home", async () => {
+  app.post("/cast/home", async (_req, reply) => {
     try {
       await execCommand("adb", adbArgs(
         "shell",
@@ -591,15 +600,15 @@ POST endpoints (JSON body)
       castManager.broadcastToast("Home");
       return { ok: true };
     } catch {
-      return { error: "failed to send home key" };
+      return reply.code(500).send({ error: "failed to send home key" });
     }
   });
 
   app.post<{ Body: { type?: number; payload_hex?: string } }>(
     "/cast/mud",
-    async (req) => {
+    async (req, reply) => {
       const session = castManager.getSession();
-      if (!session?.connected) return { error: "cast not active" };
+      if (!session?.connected) return castNotActive(reply);
       const typeId = req.body?.type ?? 0;
       const payloadHex = req.body?.payload_hex ?? "";
       const payload = payloadHex ? Buffer.from(payloadHex, "hex") : undefined;

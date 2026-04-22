@@ -11,6 +11,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { screenshotCommand } from './commands/screenshot.js';
+import { castScreenshotCommand, type CastEyeMode } from './commands/cast-screenshot.js';
 import { openCommand } from './commands/open.js';
 import { tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
@@ -89,6 +90,42 @@ cli.command(
       argv.caption as string | undefined
     );
   }
+);
+
+// Cast screenshot — capture a validated per-eye/stereo frame via the daemon
+cli.command(
+  'cast-screenshot <directory>',
+  'Capture a per-eye/stereo VR frame from the cast daemon and write a validated JPEG',
+  (yargs) => {
+    return yargs
+      .positional('directory', {
+        describe: 'Output directory path',
+        type: 'string',
+        demandOption: true,
+      })
+      .option('mode', {
+        describe: 'Eye mode',
+        type: 'string',
+        choices: ['left', 'right', 'stereo'] as const,
+        default: 'stereo',
+        alias: 'm',
+      })
+      .option('caption', {
+        describe: 'Caption to embed in JPEG COM metadata (also used in filename)',
+        type: 'string',
+        alias: 'c',
+      });
+  },
+  async (argv) => {
+    await castScreenshotCommand({
+      mode: argv.mode as CastEyeMode,
+      directory: argv.directory as string,
+      caption: argv.caption as string | undefined,
+      port: argv.port as number | undefined,
+      device: argv.device as string | undefined,
+      host: argv.host as string | undefined,
+    });
+  },
 );
 
 // Open command (standalone)
