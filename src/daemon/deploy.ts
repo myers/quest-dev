@@ -73,6 +73,57 @@ interface InstallResult extends ExecResult {
   totalBlocks: number;
 }
 
+export type ProgressUpdate =
+  | { kind: 'progress'; blocks: number; totalBlocks: number; pct: number }
+  | { kind: 'transferred'; blocksTransferred: number; totalBlocks: number };
+
+interface IncrementalProgressParser {
+  feed(chunk: string): void;
+  end(): void;
+}
+
+/**
+ * Parses ADB_TRACE=incremental stderr ("in priority: N of M") into throttled
+ * progress updates. Pure: no I/O, no side effects beyond the onUpdate callback.
+ * Throttle: emits a `progress` update each time `current` advances by at least
+ * 10% of `totalBlocks`. Always emits a final `transferred` update on `end()`
+ * if any blocks were seen.
+ */
+export function parseIncrementalProgress(
+  onUpdate: (u: ProgressUpdate) => void,
+): IncrementalProgressParser {
+  let buf = '';
+  let totalBlocks = 0;
+  let blocksTransferred = 0;
+  let lastReported = 0;
+
+  return {
+    feed(chunk: string): void {
+      buf += chunk;
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        const m = line.match(/in priority: (\d+) of (\d+)/);
+        if (!m) continue;
+        const current = parseInt(m[1], 10);
+        totalBlocks = parseInt(m[2], 10);
+        blocksTransferred++;
+        if (totalBlocks > 0 && current - lastReported >= totalBlocks * 0.1) {
+          const pct = Math.round((current / totalBlocks) * 100);
+          onUpdate({ kind: 'progress', blocks: current, totalBlocks, pct });
+          lastReported = current;
+        }
+      }
+    },
+    end(): void {
+      if (totalBlocks > 0) {
+        onUpdate({ kind: 'transferred', blocksTransferred, totalBlocks });
+      }
+    },
+  };
+}
+
 async function installWithProgress(
   absPath: string,
   adbArgsList: string[],
@@ -90,8 +141,18 @@ async function installWithProgress(
     let stdout = "";
     let stderr = "";
     let totalBlocks = 0;
-    let lastReported = 0;
     let blocksTransferred = 0;
+
+    const parser = parseIncrementalProgress((u) => {
+      if (u.kind === 'progress') {
+        process.stdout.write(`\r  Streaming: ${u.blocks}/${u.totalBlocks} blocks (${u.pct}%)`);
+      } else {
+        const kb = Math.round((u.blocksTransferred * 4096) / 1024);
+        console.log(`\r  Transferred: ${u.blocksTransferred} blocks (~${kb}KB)`);
+        blocksTransferred = u.blocksTransferred;
+        totalBlocks = u.totalBlocks;
+      }
+    });
 
     if (proc.stdout) {
       proc.stdout.on("data", (data) => {
@@ -103,29 +164,12 @@ async function installWithProgress(
       proc.stderr.on("data", (data) => {
         const chunk = data.toString();
         stderr += chunk;
-
-        // Parse incremental progress: "in priority: 37904 of 52096"
-        const matches = chunk.matchAll(/in priority: (\d+) of (\d+)/g);
-        for (const match of matches) {
-          const current = parseInt(match[1], 10);
-          totalBlocks = parseInt(match[2], 10);
-          blocksTransferred++;
-
-          // Report every 10% or every 5000 blocks
-          if (totalBlocks > 0 && current - lastReported >= totalBlocks * 0.1) {
-            const pct = Math.round((current / totalBlocks) * 100);
-            process.stdout.write(`\r  Streaming: ${current}/${totalBlocks} blocks (${pct}%)`);
-            lastReported = current;
-          }
-        }
+        parser.feed(chunk);
       });
     }
 
     proc.on("close", (code) => {
-      if (totalBlocks > 0) {
-        const kbTransferred = Math.round((blocksTransferred * 4096) / 1024);
-        console.log(`\r  Transferred: ${blocksTransferred} blocks (~${kbTransferred}KB)`);
-      }
+      parser.end();
       resolve({ stdout, stderr, code: code ?? 1, blocksTransferred, totalBlocks });
     });
 
