@@ -7,7 +7,7 @@ import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadPin, loadConfig } from "../utils/config.js";
+import { loadPin, loadConfig, tryLoadPin } from "../utils/config.js";
 import { getBatteryInfo } from "../utils/adb.js";
 import { execCommand } from "../utils/exec.js";
 import { adbArgs } from "../utils/adb.js";
@@ -191,11 +191,15 @@ POST endpoints (JSON body)
         return reply.code(400).send({ ok: false, error: "apk_path required" });
       }
 
-      let pin: string | undefined;
-      try {
-        pin = loadPin();
-      } catch {
-        // No PIN configured
+      const pin = tryLoadPin();
+      if (pin === null) {
+        return reply.code(400).send({
+          ok: false,
+          error:
+            "PIN required for deploy. Stay-awake must be enabled to prevent " +
+            "the Quest from sleeping mid-install. Save it with: " +
+            "quest-dev config --pin <pin>",
+        });
       }
 
       reply.raw.writeHead(200, {
@@ -209,7 +213,7 @@ POST endpoints (JSON body)
 
       try {
         await deploy(
-          { apkPath: apk_path, crashWaitMs: crash_wait_ms, pin, onEvent: writeEvent },
+          { apkPath: apk_path, pin, crashWaitMs: crash_wait_ms, onEvent: writeEvent },
           stayAwake,
           logcat,
         );
@@ -219,7 +223,6 @@ POST endpoints (JSON body)
         try { reply.raw.end(); } catch { /* ignore */ }
       }
 
-      // We already wrote to reply.raw; returning reply tells Fastify not to auto-serialize.
       return reply;
     },
   );
