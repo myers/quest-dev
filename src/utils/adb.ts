@@ -482,3 +482,73 @@ export async function getBatteryInfo(): Promise<BatteryInfo> {
 export function formatBatteryInfo(info: BatteryInfo): string {
   return `${info.level}% ${info.state}`;
 }
+
+// --- ADB health check ---
+
+const ADB_PROBE_TIMEOUT_MS = 3000;
+const TCP_DEVICE_REGEX = /^\d+\.\d+\.\d+\.\d+(:\d+)?$/;
+
+export type AdbHealthStatus =
+  | { kind: 'healthy' }
+  | { kind: 'recovered'; via: 'reconnect' | 'kill-server' }
+  | { kind: 'failed'; error: string };
+
+export interface AdbHealthEvents {
+  onReconnecting?: () => void;
+  onRestartingServer?: () => void;
+  onRecovered?: (via: 'reconnect' | 'kill-server') => void;
+  onFailed?: (error: string) => void;
+}
+
+/**
+ * Run a single round-trip probe against the connected device.
+ * Returns null on success, or an error message on failure (including timeout).
+ */
+async function probeAdb(): Promise<string | null> {
+  const probe = execCommandFull('adb', adbArgs('shell', 'true'));
+  const timeout = new Promise<{ code: number; stderr: string; stdout: string }>((resolve) => {
+    setTimeout(() => resolve({ code: 124, stderr: `probe timed out after ${ADB_PROBE_TIMEOUT_MS}ms`, stdout: '' }), ADB_PROBE_TIMEOUT_MS);
+  });
+  const result = await Promise.race([probe, timeout]);
+  if (result.code === 0) return null;
+  return result.stderr.trim() || `probe exited ${result.code}`;
+}
+
+/**
+ * Ensure the connected ADB device responds to a shell probe. If the probe
+ * fails, attempt recovery in two stages:
+ *   1. TCP devices only: `adb disconnect` + `adb connect`.
+ *   2. Fallback: `adb kill-server` + `adb start-server`.
+ * Reports progress via optional callbacks; healthy path is silent.
+ */
+export async function ensureAdbHealthy(events?: AdbHealthEvents): Promise<AdbHealthStatus> {
+  let lastError = await probeAdb();
+  if (lastError === null) return { kind: 'healthy' };
+
+  const target = getAdbDevice();
+  const isTcp = target !== undefined && TCP_DEVICE_REGEX.test(target);
+
+  if (isTcp && target) {
+    events?.onReconnecting?.();
+    await execCommandFull('adb', ['disconnect', target]);
+    await execCommandFull('adb', ['connect', target]);
+    lastError = await probeAdb();
+    if (lastError === null) {
+      events?.onRecovered?.('reconnect');
+      return { kind: 'recovered', via: 'reconnect' };
+    }
+  }
+
+  events?.onRestartingServer?.();
+  await execCommandFull('adb', ['kill-server']);
+  await execCommandFull('adb', ['start-server']);
+  lastError = await probeAdb();
+  if (lastError === null) {
+    events?.onRecovered?.('kill-server');
+    return { kind: 'recovered', via: 'kill-server' };
+  }
+
+  const message = lastError ?? 'ADB unresponsive';
+  events?.onFailed?.(message);
+  return { kind: 'failed', error: message };
+}
