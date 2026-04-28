@@ -423,6 +423,22 @@ cli.command(
       }
 
       switch (event.type) {
+        case 'adb_health':
+          switch (event.status) {
+            case 'reconnecting':
+              console.log('ADB: reconnecting...');
+              break;
+            case 'restarting_server':
+              console.log('ADB: restarting server...');
+              break;
+            case 'recovered':
+              console.log(`ADB: recovered (${event.via === 'reconnect' ? 'reconnected' : 'server restarted'})`);
+              break;
+            case 'failed':
+              console.error(`ADB: FAILED — ${event.error}`);
+              break;
+          }
+          break;
         case 'stay_awake':
           switch (event.status) {
             case 'already_enabled':
