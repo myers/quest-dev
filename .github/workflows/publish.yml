@@ -48,11 +48,20 @@ jobs:
           if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
             echo "${PKG_NAME}@${PKG_VERSION} already published, skipping"
           else
-            pnpm publish --provenance --access public --no-git-checks
+            if [[ "${{ github.ref_name }}" == *-* ]]; then
+              pnpm publish --tag next --provenance --access public --no-git-checks
+            else
+              pnpm publish --provenance --access public --no-git-checks
+            fi
           fi
 
       - name: Publish @myerscarpenter/quest-dev
-        run: pnpm publish --provenance --access public --no-git-checks
+        run: |
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            pnpm publish --tag next --provenance --access public --no-git-checks
+          else
+            pnpm publish --provenance --access public --no-git-checks
+          fi
 
       - name: Create GitHub Release
         env:
@@ -64,4 +73,8 @@ jobs:
           else
             NOTES="Initial release"
           fi
-          gh release create "${{ github.ref_name }}" --notes "$NOTES"
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            gh release create "${{ github.ref_name }}" --notes "$NOTES" --prerelease
+          else
+            gh release create "${{ github.ref_name }}" --notes "$NOTES"
+          fi

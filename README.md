@@ -8,6 +8,12 @@ CLI tools for Meta Quest development — stay awake, screenshots, URL opening, l
 npm install -g @myerscarpenter/quest-dev
 ```
 
+To install a prerelease build (newer features, may have bugs):
+
+```bash
+npm install -g @myerscarpenter/quest-dev@next
+```
+
 ## Prerequisites
 
 - **ADB** - Android Debug Bridge must be installed and in your PATH
