@@ -189,11 +189,23 @@ POST endpoints (JSON body)
         // No PIN configured
       }
 
-      const result: DeployResult = await deploy(
-        { apkPath: apk_path, crashWaitMs: crash_wait_ms, pin },
+      let doneEvent: (DeployResult & { type: 'done' }) | undefined;
+      await deploy(
+        {
+          apkPath: apk_path,
+          crashWaitMs: crash_wait_ms,
+          pin,
+          onEvent: (e) => {
+            if (e.type === 'done') doneEvent = e;
+          },
+        },
         stayAwake,
         logcat,
       );
+      if (!doneEvent) {
+        return { ok: false, package: "", crashed: false, error: "deploy ended without done event" };
+      }
+      const { type: _t, ...result } = doneEvent;
       return result;
     },
   );

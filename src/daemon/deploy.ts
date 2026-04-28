@@ -17,6 +17,7 @@ export interface DeployOptions {
   apkPath: string;
   crashWaitMs?: number;
   pin?: string;
+  onEvent: (event: DeployEvent) => void;
 }
 
 export interface InstallInfo {
@@ -32,6 +33,14 @@ export type DeployResult =
   | { ok: true;  package: string; crashed: false; logcatFile: string; install?: InstallInfo }
   | { ok: false; package: string; crashed: true;  logcatFile: string; logcatLines?: string[]; error?: string }
   | { ok: false; package: string; crashed: false; error: string; logcatFile?: string };
+
+export type DeployEvent =
+  | { type: 'started'; package: string; apkSizeMB: number; incremental: boolean }
+  | { type: 'install_progress'; blocks: number; totalBlocks: number; pct: number }
+  | { type: 'installed'; installSecs: number; blocksTransferred?: number; totalBlocks?: number; bytesTransferred?: number }
+  | { type: 'launching' }
+  | { type: 'crash_check'; waitMs: number }
+  | ({ type: 'done' } & DeployResult);
 
 /**
  * Extract package name from APK using aapt2 or aapt
@@ -128,6 +137,7 @@ async function installWithProgress(
   absPath: string,
   adbArgsList: string[],
   hasIdsig: boolean,
+  onEvent: (event: DeployEvent) => void,
 ): Promise<InstallResult> {
   if (!hasIdsig) {
     const result = await execCommandFull("adb", adbArgsList);
@@ -145,10 +155,8 @@ async function installWithProgress(
 
     const parser = parseIncrementalProgress((u) => {
       if (u.kind === 'progress') {
-        process.stdout.write(`\r  Streaming: ${u.blocks}/${u.totalBlocks} blocks (${u.pct}%)`);
+        onEvent({ type: 'install_progress', blocks: u.blocks, totalBlocks: u.totalBlocks, pct: u.pct });
       } else {
-        const kb = Math.round((u.blocksTransferred * 4096) / 1024);
-        console.log(`\r  Transferred: ${u.blocksTransferred} blocks (~${kb}KB)`);
         blocksTransferred = u.blocksTransferred;
         totalBlocks = u.totalBlocks;
       }
@@ -186,8 +194,8 @@ export async function deploy(
   options: DeployOptions,
   stayAwake: StayAwakeManager,
   logcat: LogcatManager,
-): Promise<DeployResult> {
-  const { apkPath, crashWaitMs = 5000, pin } = options;
+): Promise<void> {
+  const { apkPath, crashWaitMs = 5000, pin, onEvent } = options;
   const absPath = resolve(apkPath);
 
   // Keep Quest awake FIRST — before anything else touches ADB.
@@ -202,7 +210,8 @@ export async function deploy(
 
   // Validate APK exists
   if (!existsSync(absPath)) {
-    return { ok: false, package: "", crashed: false, error: `APK not found: ${absPath}` };
+    onEvent({ type: 'done', ok: false, package: "", crashed: false, error: `APK not found: ${absPath}` });
+    return;
   }
 
   // Warn if APK is stale (older than 1 minute — probably deploying old code)
@@ -217,15 +226,15 @@ export async function deploy(
   let packageName: string;
   try {
     packageName = await extractPackageName(absPath);
-    console.log(`Package: ${packageName}`);
   } catch (error) {
-    return {
-      ok: false,
-      package: "",
-      crashed: false,
-      error: (error as Error).message,
-    };
+    onEvent({ type: 'done', ok: false, package: "", crashed: false, error: (error as Error).message });
+    return;
   }
+
+  const apkSizeMB = parseFloat((statSync(absPath).size / 1_048_576).toFixed(1));
+  const hasIdsig = existsSync(`${absPath}.idsig`);
+
+  onEvent({ type: 'started', package: packageName, apkSizeMB, incremental: hasIdsig });
 
   // Force-stop existing app
   try {
@@ -236,49 +245,55 @@ export async function deploy(
   }
 
   // Install APK
-  const apkSizeMB = (statSync(absPath).size / 1_048_576).toFixed(1);
-  const hasIdsig = existsSync(`${absPath}.idsig`);
-  console.log(`Installing APK (${apkSizeMB} MB)${hasIdsig ? " [incremental]" : ""}...`);
   const installStart = Date.now();
   const installResult = await installWithProgress(
     absPath,
     adbArgs("install", "-r", absPath),
     hasIdsig,
+    onEvent,
   );
-  const installSecs = ((Date.now() - installStart) / 1000).toFixed(1);
+  const installSecs = parseFloat(((Date.now() - installStart) / 1000).toFixed(1));
   verbose("Install stdout:", installResult.stdout.trim());
   verbose("Install stderr:", installResult.stderr.trim());
   if (installResult.code !== 0) {
     const detail = [installResult.stdout.trim(), installResult.stderr.trim()]
       .filter(Boolean)
       .join("\n");
-    return {
+    onEvent({
+      type: 'done',
       ok: false,
       package: packageName,
       crashed: false,
       error: `Install failed (exit ${installResult.code}):\n${detail}`,
-    };
+    });
+    return;
   }
-  const apkSizeNum = parseFloat(apkSizeMB);
   const installInfo: InstallInfo = {
     incremental: hasIdsig,
-    installSecs: parseFloat(installSecs),
-    apkSizeMB: apkSizeNum,
+    installSecs,
+    apkSizeMB,
     ...(installResult.totalBlocks > 0 ? {
       blocksTransferred: installResult.blocksTransferred,
       totalBlocks: installResult.totalBlocks,
       bytesTransferred: installResult.blocksTransferred * 4096,
     } : {}),
   };
-  console.log(`APK installed (${installSecs}s)`);
+  onEvent({
+    type: 'installed',
+    installSecs,
+    ...(installResult.totalBlocks > 0 ? {
+      blocksTransferred: installResult.blocksTransferred,
+      totalBlocks: installResult.totalBlocks,
+      bytesTransferred: installResult.blocksTransferred * 4096,
+    } : {}),
+  });
 
   // Start logcat capture (clears buffer first)
   await logcat.start();
   const logcatFile = logcat.status().file;
   if (!logcatFile) throw new Error("logcat started but no file created");
 
-  // Launch app
-  console.log("Launching app...");
+  onEvent({ type: 'launching' });
   try {
     // Try to launch via monkey (works for any app with a launcher activity)
     await execCommand("adb", adbArgs(
@@ -292,17 +307,18 @@ export async function deploy(
     ));
     verbose(`Launched ${packageName}`);
   } catch (error) {
-    return {
+    onEvent({
+      type: 'done',
       ok: false,
       package: packageName,
       crashed: false,
       logcatFile,
       error: `Launch failed: ${(error as Error).message}`,
-    };
+    });
+    return;
   }
 
-  // Wait for potential crash
-  console.log(`Waiting ${crashWaitMs}ms for crash check...`);
+  onEvent({ type: 'crash_check', waitMs: crashWaitMs });
   await new Promise((r) => setTimeout(r, crashWaitMs));
 
   // Check for crash in logcat
@@ -314,14 +330,16 @@ export async function deploy(
       `Matched pattern: /${matchedPattern}/`,
       `Triggered by line: ${matchedLine}`,
     ].join("\n");
-    return {
+    onEvent({
+      type: 'done',
       ok: false,
       package: packageName,
       crashed: true,
       logcatLines: lines,
       logcatFile,
       error: detail,
-    };
+    });
+    return;
   }
 
   // Verify process is still running
@@ -336,16 +354,36 @@ export async function deploy(
   if (!processAlive) {
     // Process died without obvious crash pattern
     const tail = logcat.readTail(100);
-    return {
+    onEvent({
+      type: 'done',
       ok: false,
       package: packageName,
       crashed: true,
       logcatLines: tail,
       logcatFile,
       error: `Process not running (pidof exit=${psResult.code}, stdout="${pid}", stderr="${psResult.stderr.trim()}")`,
-    };
+    });
+    return;
   }
 
-  console.log(`Deploy successful: ${packageName} is running`);
-  return { ok: true, package: packageName, crashed: false, logcatFile, install: installInfo };
+  onEvent({
+    type: 'done',
+    ok: true,
+    package: packageName,
+    crashed: false,
+    logcatFile,
+    install: installInfo,
+  });
+}
+
+/**
+ * Test helper: collects events into an array. Returns the array; the caller
+ * passes `collector.push` as the onEvent callback to deploy().
+ */
+export function collectDeployEvents(): {
+  events: DeployEvent[];
+  push: (e: DeployEvent) => void;
+} {
+  const events: DeployEvent[] = [];
+  return { events, push: (e) => events.push(e) };
 }

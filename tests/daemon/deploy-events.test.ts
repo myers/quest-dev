@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseIncrementalProgress, type ProgressUpdate } from '../../src/daemon/deploy.js';
+import { parseIncrementalProgress, type ProgressUpdate, collectDeployEvents, deploy, type DeployEvent } from '../../src/daemon/deploy.js';
+import { vi } from 'vitest';
 
 describe('parseIncrementalProgress', () => {
   it('emits one update per ~10% of total, plus a final transferred update', () => {
@@ -40,5 +41,46 @@ describe('parseIncrementalProgress', () => {
     const progress = updates.filter((u) => u.kind === 'progress');
     expect(progress.length).toBe(1);
     expect(progress[0]).toMatchObject({ blocks: 50, totalBlocks: 100, pct: 50 });
+  });
+});
+
+describe('DeployEvent type', () => {
+  it('exposes the expected event shapes (compile-time check)', () => {
+    const events: DeployEvent[] = [
+      { type: 'started', package: 'com.example', apkSizeMB: 1, incremental: true },
+      { type: 'install_progress', blocks: 1, totalBlocks: 10, pct: 10 },
+      { type: 'installed', installSecs: 1.0 },
+      { type: 'launching' },
+      { type: 'crash_check', waitMs: 5000 },
+      { type: 'done', ok: true, package: 'com.example', crashed: false, logcatFile: '/tmp/x' },
+    ];
+    expect(events).toHaveLength(6);
+  });
+});
+
+describe('deploy() event sequence', () => {
+  it('emits a done event for an APK that does not exist', async () => {
+    const { events, push } = collectDeployEvents();
+    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+    const logcat = {
+      start: vi.fn(),
+      status: () => ({ file: '/tmp/fake.log' }),
+      scanForCrash: () => ({ crashed: false, lines: [] }),
+      readTail: () => [],
+    } as any;
+
+    await deploy(
+      { apkPath: '/definitely/does/not/exist.apk', onEvent: push },
+      stayAwake,
+      logcat,
+    );
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'done',
+      ok: false,
+      crashed: false,
+      error: expect.stringContaining('APK not found'),
+    });
   });
 });
