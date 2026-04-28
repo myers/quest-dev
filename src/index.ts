@@ -17,7 +17,8 @@ import { batteryCommand } from './commands/battery.js';
 import { stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
-import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, resolvePort, resolveHost } from './daemon/client.js';
+import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, daemonFetchNdjson, resolvePort, resolveHost } from './daemon/client.js';
+import type { DeployEvent, DeployResult } from './daemon/deploy.js';
 import { startDaemon } from './daemon/daemon.js';
 import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
 
@@ -337,31 +338,76 @@ cli.command(
   },
   async (argv) => {
     const apkPath = resolve(argv.apk as string);
-    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
+    const info = await ensureDaemon({
+      port: argv.port as number | undefined,
+      device: argv.device as string | undefined,
+      host: argv.host as string | undefined,
+    });
 
     console.log(`Deploying: ${apkPath}`);
-    const result = await daemonFetch(info, '/deploy', {
-      body: {
-        apk_path: apkPath,
-        crash_wait_ms: argv.crashWait,
-      },
-    }) as {
-      ok: boolean;
-      package: string;
-      crashed: boolean;
-      logcatLines?: string[];
-      logcatFile?: string;
-      error?: string;
-      install?: {
-        incremental: boolean;
-        blocksTransferred?: number;
-        totalBlocks?: number;
-        bytesTransferred?: number;
-        installSecs: number;
-        apkSizeMB: number;
-      };
-    };
 
+    let sawDone = false;
+    let lastSeenPackage = '';
+    let finalEvent: (DeployResult & { type: 'done' }) | undefined;
+    let validationError: { ok: false; error: string } | undefined;
+
+    for await (const event of daemonFetchNdjson<DeployEvent | { ok: false; error: string }>(
+      info,
+      '/deploy',
+      { apk_path: apkPath, crash_wait_ms: argv.crashWait },
+    )) {
+      // Validation-error fallback: response was plain JSON, so we got one
+      // object that doesn't have a `type` field.
+      if (!('type' in event)) {
+        validationError = event;
+        break;
+      }
+
+      switch (event.type) {
+        case 'started':
+          lastSeenPackage = event.package;
+          console.log(`Package: ${event.package}`);
+          console.log(`Installing APK (${event.apkSizeMB} MB)${event.incremental ? ' [incremental]' : ''}...`);
+          break;
+        case 'install_progress':
+          process.stdout.write(`\r  Streaming: ${event.blocks}/${event.totalBlocks} blocks (${event.pct}%)`);
+          break;
+        case 'installed':
+          if (event.totalBlocks) {
+            const kb = Math.round((event.bytesTransferred ?? 0) / 1024);
+            process.stdout.write(`\r  Transferred: ${event.blocksTransferred}/${event.totalBlocks} blocks (~${kb}KB)\n`);
+          }
+          console.log(`APK installed (${event.installSecs}s)`);
+          break;
+        case 'launching':
+          console.log('Launching app...');
+          break;
+        case 'crash_check':
+          console.log(`Waiting ${event.waitMs}ms for crash check...`);
+          break;
+        case 'done':
+          sawDone = true;
+          finalEvent = event;
+          break;
+      }
+    }
+
+    if (validationError) {
+      console.error(`\nDeploy failed: ${validationError.error}`);
+      process.exit(1);
+    }
+
+    if (!sawDone) {
+      console.error(
+        `\nConnection to daemon dropped before deploy completed.` +
+        (lastSeenPackage ? ` Last known package: ${lastSeenPackage}.` : '') +
+        `\n  Check status: quest-dev logcat` +
+        (lastSeenPackage ? `\n  Verify install: adb shell pidof ${lastSeenPackage}` : ''),
+      );
+      process.exit(1);
+    }
+
+    const result = finalEvent!;
     if (result.ok) {
       const inst = result.install;
       if (inst) {
