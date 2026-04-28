@@ -16,6 +16,7 @@ import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 import type { CastManager } from "./cast-manager.js";
 import { deploy, type DeployEvent } from "./deploy.js";
+import { getPackageVersion } from "../utils/version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -107,6 +108,7 @@ POST endpoints (JSON body)
     const logcatStatus = logcat.status();
 
     return {
+      version: getPackageVersion(),
       uptime: Math.round(process.uptime()),
       pid: process.pid,
       stay_awake: stayAwake.isEnabled,

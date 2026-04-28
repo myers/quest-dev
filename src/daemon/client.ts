@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { DAEMON_JSON, type DaemonInfo } from "./daemon.js";
 import { loadConfig } from "../utils/config.js";
 import { verbose } from "../utils/verbose.js";
+import { getPackageVersion } from "../utils/version.js";
 
 const DEFAULT_PORT = 19872;
 
@@ -162,18 +163,64 @@ export interface EnsureDaemonOptions {
   lowBattery?: number;
 }
 
+/** Fetch the running daemon's reported version string, or null if unavailable. */
+async function fetchDaemonVersion(info: DaemonInfo): Promise<string | null> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${info.port}/status`);
+    if (!r.ok) return null;
+    const body = (await r.json()) as { version?: unknown };
+    return typeof body.version === "string" ? body.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ask the daemon to shut down, then wait until daemon.json is gone (PID dead). */
+async function stopDaemonAndWait(info: DaemonInfo): Promise<void> {
+  try {
+    await fetch(`http://127.0.0.1:${info.port}/shutdown`, { method: "POST" });
+  } catch {
+    // Daemon may have already died; fall through to wait.
+  }
+  for (let i = 0; i < 50; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (!existsSync(DAEMON_JSON)) return;
+    if (!isPidAlive(info.pid)) {
+      try {
+        unlinkSync(DAEMON_JSON);
+      } catch {
+        // Best effort
+      }
+      return;
+    }
+  }
+  throw new Error(
+    `Daemon (PID ${info.pid}) did not exit after /shutdown; remove ${DAEMON_JSON} manually if needed`,
+  );
+}
+
 /** Ensure daemon is running, starting it if needed. Returns connection info. */
 export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<DaemonInfo> {
-  const existing = discoverDaemon();
+  const cliVersion = getPackageVersion();
+  let existing = discoverDaemon();
   if (existing) {
     const requestedDevice = resolveDevice(opts.device);
     const check = checkDaemonDevice(existing.device, requestedDevice);
     if (!check.ok) {
       throw new DaemonDeviceMismatchError(check.bound, check.requested);
     }
-    verbose(`Daemon already running (PID: ${existing.pid}, port: ${existing.port})`);
-    printDaemonUrl(existing.port);
-    return existing;
+    const daemonVersion = await fetchDaemonVersion(existing);
+    if (daemonVersion !== null && daemonVersion !== cliVersion) {
+      console.log(
+        `Daemon is v${daemonVersion} but CLI is v${cliVersion}, restarting daemon...`,
+      );
+      await stopDaemonAndWait(existing);
+      existing = null;
+    } else {
+      verbose(`Daemon already running (PID: ${existing.pid}, port: ${existing.port})`);
+      printDaemonUrl(existing.port);
+      return existing;
+    }
   }
 
   const port = resolvePort(opts.port);
