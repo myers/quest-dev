@@ -164,3 +164,66 @@ export async function daemonRequest(
   const info = await ensureDaemon();
   return daemonFetch(info, path, options);
 }
+
+/**
+ * Stream an NDJSON response from the daemon as an async generator.
+ * Each yielded value is one parsed JSON object from the stream.
+ *
+ * If the daemon returns plain JSON (e.g. a validation 400), the entire
+ * response body is parsed and yielded as a single value, then the
+ * generator returns. This means consumers always see a sequence of
+ * "events" regardless of which response shape they got.
+ */
+export async function* daemonFetchNdjson<T>(
+  info: DaemonInfo,
+  path: string,
+  body: unknown,
+): AsyncGenerator<T> {
+  const response = await fetch(`http://127.0.0.1:${info.port}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const ct = response.headers.get("content-type") ?? "";
+  if (!ct.includes("application/x-ndjson")) {
+    if (ct.includes("application/json")) {
+      yield (await response.json()) as T;
+      return;
+    }
+    const text = await response.text();
+    throw new Error(
+      `Unexpected response from ${path} (HTTP ${response.status}, Content-Type: ${ct || "none"}): ${text.slice(0, 200)}`,
+    );
+  }
+
+  if (!response.body) {
+    throw new Error(`NDJSON response from ${path} had no body`);
+  }
+
+  const parseLine = (line: string): T => {
+    try {
+      return JSON.parse(line) as T;
+    } catch (err) {
+      throw new Error(
+        `Invalid NDJSON line from ${path}: ${(err as Error).message} — line: ${line.slice(0, 200)}`,
+      );
+    }
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) yield parseLine(line);
+    }
+  }
+  if (buf.trim()) yield parseLine(buf.trim());
+}
