@@ -423,6 +423,22 @@ cli.command(
       }
 
       switch (event.type) {
+        case 'stay_awake':
+          switch (event.status) {
+            case 'already_enabled':
+              console.log('Stay-awake: already enabled');
+              break;
+            case 'enabling':
+              console.log('Stay-awake: enabling...');
+              break;
+            case 'enabled':
+              console.log('Stay-awake: enabled');
+              break;
+            case 'failed':
+              console.error(`Stay-awake: FAILED — ${event.error ?? 'unknown error'}`);
+              break;
+          }
+          break;
         case 'started':
           lastSeenPackage = event.package;
           console.log(`Package: ${event.package}`);
