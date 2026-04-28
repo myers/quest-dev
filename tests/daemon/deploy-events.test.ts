@@ -47,6 +47,10 @@ describe('parseIncrementalProgress', () => {
 describe('DeployEvent type', () => {
   it('exposes the expected event shapes (compile-time check)', () => {
     const events: DeployEvent[] = [
+      { type: 'stay_awake', status: 'already_enabled' },
+      { type: 'stay_awake', status: 'enabling' },
+      { type: 'stay_awake', status: 'enabled' },
+      { type: 'stay_awake', status: 'failed', error: 'oops' },
       { type: 'started', package: 'com.example', apkSizeMB: 1, incremental: true },
       { type: 'install_progress', blocks: 1, totalBlocks: 10, pct: 10 },
       { type: 'installed', installSecs: 1.0 },
@@ -54,7 +58,7 @@ describe('DeployEvent type', () => {
       { type: 'crash_check', waitMs: 5000 },
       { type: 'done', ok: true, package: 'com.example', crashed: false, logcatFile: '/tmp/x' },
     ];
-    expect(events).toHaveLength(6);
+    expect(events).toHaveLength(10);
   });
 });
 

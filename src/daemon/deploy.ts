@@ -35,6 +35,7 @@ export type DeployResult =
   | { ok: false; package: string; crashed: false; error: string; logcatFile?: string };
 
 export type DeployEvent =
+  | { type: 'stay_awake'; status: 'already_enabled' | 'enabling' | 'enabled' | 'failed'; error?: string }
   | { type: 'started'; package: string; apkSizeMB: number; incremental: boolean }
   | { type: 'install_progress'; blocks: number; totalBlocks: number; pct: number }
   | { type: 'installed'; installSecs: number; blocksTransferred?: number; totalBlocks?: number; bytesTransferred?: number }
