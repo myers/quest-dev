@@ -18,7 +18,7 @@ import { batteryCommand } from './commands/battery.js';
 import { stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
-import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, daemonFetchNdjson, resolvePort, resolveHost } from './daemon/client.js';
+import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, daemonFetchNdjson, resolvePort, resolveHost, DaemonDeviceMismatchError } from './daemon/client.js';
 import type { DeployEvent, DeployResult } from './daemon/deploy.js';
 import { startDaemon } from './daemon/daemon.js';
 import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
@@ -29,6 +29,26 @@ const packageJson = JSON.parse(
   readFileSync(join(__dirname, '../package.json'), 'utf-8')
 );
 const version = packageJson.version;
+
+/**
+ * Catch DaemonDeviceMismatchError thrown by ensureDaemon, print a clear
+ * message, and exit. `retryHint` is the user-facing command line they
+ * should run after `quest-dev stop`.
+ */
+function handleDaemonError(err: unknown, retryHint: string): never {
+  if (err instanceof DaemonDeviceMismatchError) {
+    console.error(
+      `Error: daemon is bound to ${err.bound} but --device requested ${err.requested}.\n` +
+        `\n` +
+        `  Stop the running daemon first:\n` +
+        `    quest-dev stop\n` +
+        `  Then retry:\n` +
+        `    ${retryHint}`,
+    );
+    process.exit(1);
+  }
+  throw err;
+}
 
 // Create CLI
 const cli = yargs(hideBin(process.argv))
@@ -186,7 +206,8 @@ cli.command(
     }
 
     // Delegate to daemon
-    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
+    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined })
+      .catch((e) => handleDaemonError(e, `quest-dev logcat --device ${argv.device ?? '<ip>'} ${action}`));
     switch (action) {
       case 'start': {
         const result = await daemonFetch(info, '/logcat/start', {
@@ -267,7 +288,8 @@ cli.command(
       });
   },
   async (argv) => {
-    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
+    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined })
+      .catch((e) => handleDaemonError(e, `quest-dev start --device ${argv.device ?? '<ip>'}`));
 
     // Enable stay-awake
     const result = await daemonFetch(info, '/stay-awake/enable', {
@@ -342,7 +364,7 @@ cli.command(
       host: argv.host as string | undefined,
       idleTimeout: argv.idleTimeout as number | undefined,
       lowBattery: argv.lowBattery as number | undefined,
-    });
+    }).catch((e) => handleDaemonError(e, `quest-dev stay-awake --device ${argv.device ?? '<ip>'}`));
     const result = await daemonFetch(info, '/stay-awake/enable', {
       body: { pin: argv.pin },
     }) as { ok: boolean; error?: string };
@@ -379,7 +401,7 @@ cli.command(
       port: argv.port as number | undefined,
       device: argv.device as string | undefined,
       host: argv.host as string | undefined,
-    });
+    }).catch((e) => handleDaemonError(e, `quest-dev deploy --device ${argv.device ?? '<ip>'} ${argv.apk}`));
 
     console.log(`Deploying: ${apkPath}`);
 

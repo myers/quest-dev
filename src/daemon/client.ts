@@ -102,6 +102,51 @@ export function resolveDevice(cliDevice?: string): string | undefined {
   return config.device;
 }
 
+/**
+ * Thrown when the running daemon is bound to a different ADB device than
+ * the one the caller requested via --device. CLI handlers should catch
+ * this, print a helpful message, and exit non-zero.
+ */
+export class DaemonDeviceMismatchError extends Error {
+  readonly bound: string;
+  readonly requested: string;
+  constructor(bound: string, requested: string) {
+    super(`daemon is bound to ${bound} but --device requested ${requested}`);
+    this.name = "DaemonDeviceMismatchError";
+    this.bound = bound;
+    this.requested = requested;
+  }
+}
+
+/**
+ * Decide whether a discovered daemon is acceptable for the requested
+ * device. Returns ok=true to reuse the daemon, or ok=false with a
+ * conflict description when the caller should error out.
+ *
+ * Reuse rules:
+ * - both undefined → reuse
+ * - daemon set, request undefined → reuse
+ * - daemon undefined, request set → reuse (soft case: daemon is on
+ *   adb's default device, which may or may not match)
+ * - both set, equal → reuse
+ * - both set, unequal → conflict
+ */
+export function checkDaemonDevice(
+  daemonDevice: string | undefined,
+  requestedDevice: string | undefined,
+):
+  | { ok: true }
+  | { ok: false; bound: string; requested: string } {
+  if (
+    requestedDevice &&
+    daemonDevice &&
+    requestedDevice !== daemonDevice
+  ) {
+    return { ok: false, bound: daemonDevice, requested: requestedDevice };
+  }
+  return { ok: true };
+}
+
 /** Resolve host from CLI flag → config → default */
 export function resolveHost(cliHost?: string): string {
   if (cliHost) return cliHost;
@@ -121,6 +166,11 @@ export interface EnsureDaemonOptions {
 export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<DaemonInfo> {
   const existing = discoverDaemon();
   if (existing) {
+    const requestedDevice = resolveDevice(opts.device);
+    const check = checkDaemonDevice(existing.device, requestedDevice);
+    if (!check.ok) {
+      throw new DaemonDeviceMismatchError(check.bound, check.requested);
+    }
     verbose(`Daemon already running (PID: ${existing.pid}, port: ${existing.port})`);
     printDaemonUrl(existing.port);
     return existing;

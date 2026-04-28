@@ -21,6 +21,10 @@ export interface DaemonInfo {
   pid: number;
   port: number;
   startedAt: string;
+  // ADB device the daemon is bound to (IP:port or serial). Undefined means
+  // the daemon was started without --device or a configured default — i.e.
+  // it uses whatever single device adb sees by default.
+  device?: string;
 }
 
 export interface StartDaemonOptions {
@@ -148,6 +152,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<void> {
     pid: process.pid,
     port: actualPort,
     startedAt: new Date().toISOString(),
+    device,
   };
   writeFileSync(DAEMON_JSON, JSON.stringify(info, null, 2) + "\n");
 
