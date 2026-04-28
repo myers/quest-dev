@@ -15,7 +15,7 @@ import { EYE_LEFT, EYE_RIGHT, EYE_STEREO, RESOLUTIONS, resolveResolution } from 
 import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 import type { CastManager } from "./cast-manager.js";
-import { deploy, type DeployResult } from "./deploy.js";
+import { deploy, type DeployEvent } from "./deploy.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -176,9 +176,10 @@ POST endpoints (JSON body)
 
   app.post<{ Body: { apk_path: string; crash_wait_ms?: number } }>(
     "/deploy",
-    async (req) => {
+    async (req, reply) => {
       const { apk_path, crash_wait_ms } = req.body ?? {};
       if (!apk_path) {
+        reply.code(400);
         return { ok: false, error: "apk_path required" };
       }
 
@@ -189,24 +190,29 @@ POST endpoints (JSON body)
         // No PIN configured
       }
 
-      let doneEvent: (DeployResult & { type: 'done' }) | undefined;
-      await deploy(
-        {
-          apkPath: apk_path,
-          crashWaitMs: crash_wait_ms,
-          pin,
-          onEvent: (e) => {
-            if (e.type === 'done') doneEvent = e;
-          },
-        },
-        stayAwake,
-        logcat,
-      );
-      if (!doneEvent) {
-        return { ok: false, package: "", crashed: false, error: "deploy ended without done event" };
+      reply.raw.writeHead(200, {
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-cache",
+        Connection: "close",
+      });
+      const writeEvent = (e: DeployEvent) => {
+        try { reply.raw.write(JSON.stringify(e) + "\n"); } catch { /* socket gone */ }
+      };
+
+      try {
+        await deploy(
+          { apkPath: apk_path, crashWaitMs: crash_wait_ms, pin, onEvent: writeEvent },
+          stayAwake,
+          logcat,
+        );
+      } catch (err) {
+        writeEvent({ type: "done", ok: false, package: "", crashed: false, error: String(err) });
+      } finally {
+        try { reply.raw.end(); } catch { /* ignore */ }
       }
-      const { type: _t, ...result } = doneEvent;
-      return result;
+
+      // We already wrote to reply.raw; returning reply tells Fastify not to auto-serialize.
+      return reply;
     },
   );
 
