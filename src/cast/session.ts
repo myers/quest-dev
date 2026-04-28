@@ -570,10 +570,12 @@ export class CastSession extends EventEmitter {
   sendPose(pose: PoseState): void {
     this._pose = pose;
     if (this._connected && this.subMagic) {
+      // CAMERA-mode handshake (idempotent) is required so the Quest accepts
+      // our POSE messages, AND the ~27 Hz pose loop below is required to
+      // keep the override from snapping back to the live HMD pose.
+      this.ensureInputForwarding();
       this.sendXrsp(buildPose(this.subMagic, this.nextSeq(), this._pose));
     }
-    // Auto-start periodic pose loop on first pose send so the Quest
-    // accepts our camera override (requires continuous ~27 Hz updates).
     if (!this._poseLoopActive) {
       this.startPoseLoop();
     }
