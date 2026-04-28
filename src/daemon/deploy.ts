@@ -6,7 +6,7 @@
 import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { execCommand, execCommandFull, execCommandStreaming } from "../utils/exec.js";
+import { execCommand, execCommandFull } from "../utils/exec.js";
 import type { ExecResult } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs } from "../utils/adb.js";
