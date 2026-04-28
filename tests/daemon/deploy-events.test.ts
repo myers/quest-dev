@@ -63,24 +63,82 @@ describe('DeployEvent type', () => {
 });
 
 describe('deploy() event sequence', () => {
-  it('emits a done event for an APK that does not exist', async () => {
-    const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
-    const logcat = {
+  const fakeLogcat = () =>
+    ({
       start: vi.fn(),
       status: () => ({ file: '/tmp/fake.log' }),
       scanForCrash: () => ({ crashed: false, lines: [] }),
       readTail: () => [],
-    } as any;
+    }) as any;
+
+  it('emits already_enabled when stay-awake is already on', async () => {
+    const { events, push } = collectDeployEvents();
+    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
 
     await deploy(
-      { apkPath: '/definitely/does/not/exist.apk', onEvent: push },
+      { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
+      stayAwake,
+      fakeLogcat(),
+    );
+
+    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'already_enabled' });
+    expect(stayAwake.enable).not.toHaveBeenCalled();
+    // Last event is still the existing APK-missing failure.
+    expect(events.at(-1)).toMatchObject({ type: 'done', ok: false, error: expect.stringContaining('APK not found') });
+  });
+
+  it('emits enabling then enabled when stay-awake activates successfully', async () => {
+    const { events, push } = collectDeployEvents();
+    const stayAwake = { isEnabled: false, enable: vi.fn().mockResolvedValue(undefined) } as any;
+
+    await deploy(
+      { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
+      stayAwake,
+      fakeLogcat(),
+    );
+
+    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'enabling' });
+    expect(events[1]).toMatchObject({ type: 'stay_awake', status: 'enabled' });
+    expect(stayAwake.enable).toHaveBeenCalledWith('1234');
+  });
+
+  it('emits failed and aborts deploy when stay-awake activation throws', async () => {
+    const { events, push } = collectDeployEvents();
+    const stayAwake = {
+      isEnabled: false,
+      enable: vi.fn().mockRejectedValue(new Error('PIN rejected')),
+    } as any;
+    const logcat = fakeLogcat();
+
+    await deploy(
+      { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
       stayAwake,
       logcat,
     );
 
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
+    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'enabling' });
+    expect(events[1]).toMatchObject({ type: 'stay_awake', status: 'failed', error: 'PIN rejected' });
+    expect(events[2]).toMatchObject({
+      type: 'done',
+      ok: false,
+      crashed: false,
+      error: expect.stringContaining('Stay-awake failed'),
+    });
+    // Deploy must NOT have proceeded to install.
+    expect(logcat.start).not.toHaveBeenCalled();
+  });
+
+  it('emits a done event for an APK that does not exist', async () => {
+    const { events, push } = collectDeployEvents();
+    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+
+    await deploy(
+      { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
+      stayAwake,
+      fakeLogcat(),
+    );
+
+    expect(events.at(-1)).toMatchObject({
       type: 'done',
       ok: false,
       crashed: false,

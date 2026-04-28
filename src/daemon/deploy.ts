@@ -15,8 +15,8 @@ import type { LogcatManager } from "./logcat-manager.js";
 
 export interface DeployOptions {
   apkPath: string;
+  pin: string;
   crashWaitMs?: number;
-  pin?: string;
   onEvent: (event: DeployEvent) => void;
 }
 
@@ -190,12 +190,25 @@ export async function deploy(
   const absPath = resolve(apkPath);
 
   // Keep Quest awake FIRST — before anything else touches ADB.
-  // Large APK uploads over WiFi ADB fail if the Quest sleeps mid-transfer.
-  if (!stayAwake.isEnabled && pin) {
+  // Large APK uploads over Wi-Fi ADB fail if the Quest sleeps mid-transfer.
+  if (stayAwake.isEnabled) {
+    onEvent({ type: 'stay_awake', status: 'already_enabled' });
+  } else {
+    onEvent({ type: 'stay_awake', status: 'enabling' });
     try {
       await stayAwake.enable(pin);
+      onEvent({ type: 'stay_awake', status: 'enabled' });
     } catch (error) {
-      console.warn("Failed to enable stay-awake:", (error as Error).message);
+      const message = (error as Error).message;
+      onEvent({ type: 'stay_awake', status: 'failed', error: message });
+      onEvent({
+        type: 'done',
+        ok: false,
+        package: '',
+        crashed: false,
+        error: `Stay-awake failed: ${message}`,
+      });
+      return;
     }
   }
 
