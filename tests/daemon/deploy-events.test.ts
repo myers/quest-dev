@@ -47,6 +47,10 @@ describe('parseIncrementalProgress', () => {
 describe('DeployEvent type', () => {
   it('exposes the expected event shapes (compile-time check)', () => {
     const events: DeployEvent[] = [
+      { type: 'adb_health', status: 'reconnecting' },
+      { type: 'adb_health', status: 'restarting_server' },
+      { type: 'adb_health', status: 'recovered', via: 'reconnect' },
+      { type: 'adb_health', status: 'failed', error: 'oops' },
       { type: 'stay_awake', status: 'already_enabled' },
       { type: 'stay_awake', status: 'enabling' },
       { type: 'stay_awake', status: 'enabled' },
@@ -58,7 +62,7 @@ describe('DeployEvent type', () => {
       { type: 'crash_check', waitMs: 5000 },
       { type: 'done', ok: true, package: 'com.example', crashed: false, logcatFile: '/tmp/x' },
     ];
-    expect(events).toHaveLength(10);
+    expect(events).toHaveLength(14);
   });
 });
 
