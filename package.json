@@ -1,6 +1,6 @@
 {
   "name": "@myerscarpenter/quest-dev",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "CLI tools for Meta Quest development — stay awake, screenshots, URL opening, logcat, and battery via ADB",
   "type": "module",
   "bin": {
