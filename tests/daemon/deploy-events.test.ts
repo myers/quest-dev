@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { parseIncrementalProgress, type ProgressUpdate, collectDeployEvents, deploy, type DeployEvent } from '../../src/daemon/deploy.js';
 import { vi } from 'vitest';
+import * as adbModuleNs from '../../src/utils/adb.js';
 
 describe('parseIncrementalProgress', () => {
   it('emits one update per ~10% of total, plus a final transferred update', () => {
@@ -75,6 +76,12 @@ describe('deploy() event sequence', () => {
       readTail: () => [],
     }) as any;
 
+  // Default to healthy ADB so existing tests don't shell out to real adb.
+  // Individual tests can override this spy via vi.spyOn(...).mockImplementation.
+  beforeEach(() => {
+    vi.spyOn(adbModuleNs, 'ensureAdbHealthy').mockResolvedValue({ kind: 'healthy' });
+  });
+
   it('emits already_enabled when stay-awake is already on', async () => {
     const { events, push } = collectDeployEvents();
     const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
@@ -148,5 +155,58 @@ describe('deploy() event sequence', () => {
       crashed: false,
       error: expect.stringContaining('APK not found'),
     });
+  });
+
+  it('aborts with adb_health failed + done when ensureAdbHealthy returns failed', async () => {
+    const adbModule = await import('../../src/utils/adb.js');
+    const spy = vi
+      .spyOn(adbModule, 'ensureAdbHealthy')
+      .mockImplementation(async (events) => {
+        events?.onFailed?.('probe timed out');
+        return { kind: 'failed', error: 'probe timed out' };
+      });
+
+    const { events, push } = collectDeployEvents();
+    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+
+    await deploy(
+      { apkPath: '/some/path.apk', pin: '1234', onEvent: push },
+      stayAwake,
+      fakeLogcat(),
+    );
+
+    expect(events[0]).toMatchObject({ type: 'adb_health', status: 'failed', error: 'probe timed out' });
+    expect(events.at(-1)).toMatchObject({
+      type: 'done',
+      ok: false,
+      crashed: false,
+      error: expect.stringContaining('ADB unresponsive'),
+    });
+    // Stay-awake must NOT have been touched.
+    expect(stayAwake.enable).not.toHaveBeenCalled();
+    // Only adb_health + done should have been emitted (no stay_awake).
+    expect(events.find((e) => e.type === 'stay_awake')).toBeUndefined();
+    spy.mockRestore();
+  });
+
+  it('emits no adb_health events when ADB is healthy', async () => {
+    const adbModule = await import('../../src/utils/adb.js');
+    const spy = vi
+      .spyOn(adbModule, 'ensureAdbHealthy')
+      .mockResolvedValue({ kind: 'healthy' });
+
+    const { events, push } = collectDeployEvents();
+    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+
+    await deploy(
+      { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
+      stayAwake,
+      fakeLogcat(),
+    );
+
+    expect(events.find((e) => e.type === 'adb_health')).toBeUndefined();
+    // First event should be the existing already_enabled stay-awake event.
+    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'already_enabled' });
+    spy.mockRestore();
   });
 });

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import * as deployMod from '../../src/daemon/deploy.js';
 import * as configMod from '../../src/utils/config.js';
+import * as adbMod from '../../src/utils/adb.js';
 
 // We boot a tiny Fastify app that registers ONLY the /deploy route, so we can
 // assert the wire format without needing the full daemon.
@@ -65,7 +66,11 @@ async function makeApp(opts?: { pin?: string | null }): Promise<FastifyInstance>
 
 describe('POST /deploy', () => {
   let app: FastifyInstance;
-  beforeEach(async () => { app = await makeApp(); });
+  beforeEach(async () => {
+    // Default to healthy ADB so tests don't shell out to real adb.
+    vi.spyOn(adbMod, 'ensureAdbHealthy').mockResolvedValue({ kind: 'healthy' });
+    app = await makeApp();
+  });
 
   it('returns NDJSON with a terminal done event when the APK does not exist', async () => {
     const res = await app.inject({

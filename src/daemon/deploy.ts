@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { execCommand, execCommandFull } from "../utils/exec.js";
 import type { ExecResult } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
-import { adbArgs } from "../utils/adb.js";
+import { adbArgs, ensureAdbHealthy } from "../utils/adb.js";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 
@@ -191,6 +191,26 @@ export async function deploy(
 ): Promise<void> {
   const { apkPath, crashWaitMs = 5000, pin, onEvent } = options;
   const absPath = resolve(apkPath);
+
+  // Health-check ADB before doing anything. If the device is wedged, no
+  // amount of stay-awake or install will succeed; fail fast with a clear
+  // event the user can see.
+  const health = await ensureAdbHealthy({
+    onReconnecting: () => onEvent({ type: 'adb_health', status: 'reconnecting' }),
+    onRestartingServer: () => onEvent({ type: 'adb_health', status: 'restarting_server' }),
+    onRecovered: (via) => onEvent({ type: 'adb_health', status: 'recovered', via }),
+    onFailed: (error) => onEvent({ type: 'adb_health', status: 'failed', error }),
+  });
+  if (health.kind === 'failed') {
+    onEvent({
+      type: 'done',
+      ok: false,
+      package: '',
+      crashed: false,
+      error: `ADB unresponsive: ${health.error}`,
+    });
+    return;
+  }
 
   // Keep Quest awake FIRST — before anything else touches ADB.
   // Large APK uploads over Wi-Fi ADB fail if the Quest sleeps mid-transfer.
