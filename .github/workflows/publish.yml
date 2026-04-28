@@ -40,8 +40,19 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Publish to npm
-        run: npm publish --provenance --access public
+      - name: Publish @myerscarpenter/cast2-protocol (skip if version already published)
+        working-directory: packages/cast2-protocol
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version >/dev/null 2>&1; then
+            echo "${PKG_NAME}@${PKG_VERSION} already published, skipping"
+          else
+            pnpm publish --provenance --access public --no-git-checks
+          fi
+
+      - name: Publish @myerscarpenter/quest-dev
+        run: pnpm publish --provenance --access public --no-git-checks
 
       - name: Create GitHub Release
         env:

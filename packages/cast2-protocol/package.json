@@ -1,6 +1,6 @@
 {
   "name": "@myerscarpenter/cast2-protocol",
-  "version": "0.1.0",
+  "version": "2.1.2",
   "description": "Cast 2.0 protocol implementation for Meta Quest video casting — XRSP framing, MGIK sub-headers, MUD message builders, pose math, and resolution presets",
   "type": "module",
   "main": "./build/index.js",
