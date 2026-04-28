@@ -68,3 +68,15 @@ export function loadPin(cliPin?: string): string {
   console.error('The PIN is your Meta Store PIN for the logged-in account.');
   process.exit(1);
 }
+
+/**
+ * Like loadPin, but returns null instead of exiting when no PIN is configured.
+ * Use this in long-running processes (e.g. the daemon) where a missing PIN
+ * should fail one request, not crash the whole process.
+ */
+export function tryLoadPin(cliPin?: string): string | null {
+  if (cliPin) return cliPin;
+  const config = loadConfig();
+  if (config.pin) return config.pin;
+  return null;
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';
-import { loadConfig, loadPin } from '../src/utils/config.js';
+import { loadConfig, loadPin, tryLoadPin } from '../src/utils/config.js';
 
 vi.mock('fs');
 
@@ -79,5 +79,31 @@ describe('loadPin', () => {
 
     mockExit.mockRestore();
     mockError.mockRestore();
+  });
+});
+
+describe('tryLoadPin', () => {
+  it('returns CLI pin when provided', () => {
+    expect(tryLoadPin('cli-pin')).toBe('cli-pin');
+  });
+
+  it('falls back to config file pin', () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ pin: 'config-pin' }));
+    expect(tryLoadPin()).toBe('config-pin');
+  });
+
+  it('returns null when no pin is configured (does not exit)', () => {
+    mockReadFileSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit should not be called');
+    });
+
+    expect(tryLoadPin()).toBeNull();
+    expect(mockExit).not.toHaveBeenCalled();
+
+    mockExit.mockRestore();
   });
 });
