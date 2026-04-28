@@ -46,7 +46,6 @@ export type DeployEvent =
  * Extract package name from APK using aapt2 or aapt
  */
 async function extractPackageName(apkPath: string): Promise<string> {
-  // Try aapt2 first, then aapt
   for (const tool of ["aapt2", "aapt"]) {
     try {
       const output = await execCommand(tool, ["dump", "badging", apkPath]);
@@ -59,18 +58,9 @@ async function extractPackageName(apkPath: string): Promise<string> {
     }
   }
 
-  // Fallback: use adb shell to parse via pm on device (after install)
-  // But we need it before install, so try apkreader
-  try {
-    const ApkReader = (await import("adbkit-apkreader")).default;
-    const reader = await ApkReader.open(apkPath);
-    const manifest = await reader.readManifest();
-    return manifest.package;
-  } catch {
-    throw new Error(
-      "Cannot extract package name from APK. Install aapt2 (Android build-tools) or adbkit-apkreader.",
-    );
-  }
+  throw new Error(
+    "Cannot extract package name from APK. Install aapt2 (part of Android build-tools).",
+  );
 }
 
 /**
