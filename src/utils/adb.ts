@@ -512,15 +512,18 @@ export function formatBatteryInfo(info: BatteryInfo): string {
 
 const ADB_PROBE_TIMEOUT_MS = 3000;
 
+export type AdbRecoveryVia = 'connect' | 'reconnect' | 'kill-server';
+
 export type AdbHealthStatus =
   | { kind: 'healthy' }
-  | { kind: 'recovered'; via: 'reconnect' | 'kill-server' }
+  | { kind: 'recovered'; via: AdbRecoveryVia }
   | { kind: 'failed'; error: string };
 
 export interface AdbHealthEvents {
+  onConnecting?: () => void;
   onReconnecting?: () => void;
   onRestartingServer?: () => void;
-  onRecovered?: (via: 'reconnect' | 'kill-server') => void;
+  onRecovered?: (via: AdbRecoveryVia) => void;
   onFailed?: (error: string) => void;
 }
 
@@ -540,9 +543,10 @@ async function probeAdb(): Promise<string | null> {
 
 /**
  * Ensure the connected ADB device responds to a shell probe. If the probe
- * fails, attempt recovery in two stages:
- *   1. TCP devices only: `adb disconnect` + `adb connect`.
- *   2. Fallback: `adb kill-server` + `adb start-server`.
+ * fails, attempt recovery in three stages (TCP-only stages skip for USB):
+ *   1. TCP target not in `adb devices`: `adb connect <target>` (first connect).
+ *   2. TCP target in `adb devices` but probe failed: `adb disconnect` + `adb connect`.
+ *   3. Fallback: `adb kill-server` + `adb start-server`.
  * Reports progress via optional callbacks; healthy path is silent.
  */
 export async function ensureAdbHealthy(events?: AdbHealthEvents): Promise<AdbHealthStatus> {
@@ -553,13 +557,27 @@ export async function ensureAdbHealthy(events?: AdbHealthEvents): Promise<AdbHea
   const isTcp = target !== undefined && isTcpTarget(target);
 
   if (isTcp && target) {
-    events?.onReconnecting?.();
-    await execCommandFull('adb', ['disconnect', target]);
-    await execCommandFull('adb', ['connect', target]);
-    lastError = await probeAdb();
-    if (lastError === null) {
-      events?.onRecovered?.('reconnect');
-      return { kind: 'recovered', via: 'reconnect' };
+    const listOutput = await execCommand('adb', ['devices']).catch(() => '');
+    const devices = parseAdbDevices(listOutput);
+    const targetListed = devices.some(line => line.includes(target));
+
+    if (!targetListed) {
+      events?.onConnecting?.();
+      await execCommandFull('adb', ['connect', target]);
+      lastError = await probeAdb();
+      if (lastError === null) {
+        events?.onRecovered?.('connect');
+        return { kind: 'recovered', via: 'connect' };
+      }
+    } else {
+      events?.onReconnecting?.();
+      await execCommandFull('adb', ['disconnect', target]);
+      await execCommandFull('adb', ['connect', target]);
+      lastError = await probeAdb();
+      if (lastError === null) {
+        events?.onRecovered?.('reconnect');
+        return { kind: 'recovered', via: 'reconnect' };
+      }
     }
   }
 

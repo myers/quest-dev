@@ -35,8 +35,8 @@ export type DeployResult =
   | { ok: false; package: string; crashed: false; error: string; logcatFile?: string };
 
 export type DeployEvent =
-  | { type: 'adb_health'; status: 'reconnecting' | 'restarting_server' }
-  | { type: 'adb_health'; status: 'recovered'; via: 'reconnect' | 'kill-server' }
+  | { type: 'adb_health'; status: 'connecting' | 'reconnecting' | 'restarting_server' }
+  | { type: 'adb_health'; status: 'recovered'; via: 'connect' | 'reconnect' | 'kill-server' }
   | { type: 'adb_health'; status: 'failed'; error: string }
   | { type: 'stay_awake'; status: 'already_enabled' | 'enabling' | 'enabled' | 'failed'; error?: string }
   | { type: 'started'; package: string; apkSizeMB: number; incremental: boolean }
@@ -196,6 +196,7 @@ export async function deploy(
   // amount of stay-awake or install will succeed; fail fast with a clear
   // event the user can see.
   const health = await ensureAdbHealthy({
+    onConnecting: () => onEvent({ type: 'adb_health', status: 'connecting' }),
     onReconnecting: () => onEvent({ type: 'adb_health', status: 'reconnecting' }),
     onRestartingServer: () => onEvent({ type: 'adb_health', status: 'restarting_server' }),
     onRecovered: (via) => onEvent({ type: 'adb_health', status: 'recovered', via }),

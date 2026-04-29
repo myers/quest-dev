@@ -32,6 +32,28 @@ function configureExec(outcomes: MockOutcome[]) {
   });
 }
 
+/**
+ * Stub `adb devices` (which uses execCommand, not execCommandFull) to return
+ * a list with the given target marked as "device". Default for tests that
+ * exercise the "device already listed, just stale" recovery path.
+ */
+function stubAdbDevicesWith(target: string) {
+  mockedExec.execCommand.mockImplementation(async (cmd, args) => {
+    expect(cmd).toBe('adb');
+    expect(args).toEqual(['devices']);
+    return `List of devices attached\n${target}\tdevice\n`;
+  });
+}
+
+/** Stub `adb devices` to return an empty device list (target not connected). */
+function stubAdbDevicesEmpty() {
+  mockedExec.execCommand.mockImplementation(async (cmd, args) => {
+    expect(cmd).toBe('adb');
+    expect(args).toEqual(['devices']);
+    return 'List of devices attached\n';
+  });
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   setAdbDevice(undefined);
@@ -59,8 +81,33 @@ describe('ensureAdbHealthy', () => {
     expect(callbacks.onFailed).not.toHaveBeenCalled();
   });
 
-  it('recovers via TCP reconnect when first probe fails', async () => {
+  it('connects when target is TCP but not yet in adb devices', async () => {
     setAdbDevice('192.168.1.10:5555');
+    stubAdbDevicesEmpty();
+    configureExec([
+      { args: ['-s', '192.168.1.10:5555', 'shell', 'true'], result: { code: 1 } },
+      { args: ['connect', '192.168.1.10:5555'], result: { code: 0 } },
+      { args: ['-s', '192.168.1.10:5555', 'shell', 'true'], result: { code: 0 } },
+    ]);
+
+    const callbacks = {
+      onConnecting: vi.fn(),
+      onReconnecting: vi.fn(),
+      onRestartingServer: vi.fn(),
+      onRecovered: vi.fn(),
+      onFailed: vi.fn(),
+    };
+    const result = await ensureAdbHealthy(callbacks);
+
+    expect(result).toEqual({ kind: 'recovered', via: 'connect' });
+    expect(callbacks.onConnecting).toHaveBeenCalledOnce();
+    expect(callbacks.onReconnecting).not.toHaveBeenCalled();
+    expect(callbacks.onRecovered).toHaveBeenCalledWith('connect');
+  });
+
+  it('recovers via TCP reconnect when probe fails and device is already listed', async () => {
+    setAdbDevice('192.168.1.10:5555');
+    stubAdbDevicesWith('192.168.1.10:5555');
     configureExec([
       { args: ['-s', '192.168.1.10:5555', 'shell', 'true'], result: { code: 1 } },
       { args: ['disconnect', '192.168.1.10:5555'], result: { code: 0 } },
@@ -69,6 +116,7 @@ describe('ensureAdbHealthy', () => {
     ]);
 
     const callbacks = {
+      onConnecting: vi.fn(),
       onReconnecting: vi.fn(),
       onRestartingServer: vi.fn(),
       onRecovered: vi.fn(),
@@ -78,6 +126,7 @@ describe('ensureAdbHealthy', () => {
 
     expect(result).toEqual({ kind: 'recovered', via: 'reconnect' });
     expect(callbacks.onReconnecting).toHaveBeenCalledOnce();
+    expect(callbacks.onConnecting).not.toHaveBeenCalled();
     expect(callbacks.onRecovered).toHaveBeenCalledWith('reconnect');
     expect(callbacks.onRestartingServer).not.toHaveBeenCalled();
     expect(callbacks.onFailed).not.toHaveBeenCalled();
@@ -85,6 +134,7 @@ describe('ensureAdbHealthy', () => {
 
   it('falls through to kill-server when reconnect does not help', async () => {
     setAdbDevice('192.168.1.10:5555');
+    stubAdbDevicesWith('192.168.1.10:5555');
     configureExec([
       { args: ['-s', '192.168.1.10:5555', 'shell', 'true'], result: { code: 1 } },
       { args: ['disconnect', '192.168.1.10:5555'], result: { code: 0 } },
@@ -96,6 +146,7 @@ describe('ensureAdbHealthy', () => {
     ]);
 
     const callbacks = {
+      onConnecting: vi.fn(),
       onReconnecting: vi.fn(),
       onRestartingServer: vi.fn(),
       onRecovered: vi.fn(),
@@ -151,6 +202,7 @@ describe('ensureAdbHealthy', () => {
 
   it('returns failed and fires onFailed when all recovery fails', async () => {
     setAdbDevice('192.168.1.10:5555');
+    stubAdbDevicesWith('192.168.1.10:5555');
     configureExec([
       { args: ['-s', '192.168.1.10:5555', 'shell', 'true'], result: { code: 1, stderr: 'no devices' } },
       { args: ['disconnect', '192.168.1.10:5555'], result: { code: 0 } },
@@ -161,7 +213,7 @@ describe('ensureAdbHealthy', () => {
       { args: ['-s', '192.168.1.10:5555', 'shell', 'true'], result: { code: 1, stderr: 'still dead' } },
     ]);
 
-    const callbacks = { onReconnecting: vi.fn(), onRestartingServer: vi.fn(), onRecovered: vi.fn(), onFailed: vi.fn() };
+    const callbacks = { onConnecting: vi.fn(), onReconnecting: vi.fn(), onRestartingServer: vi.fn(), onRecovered: vi.fn(), onFailed: vi.fn() };
     const result = await ensureAdbHealthy(callbacks);
 
     expect(result.kind).toBe('failed');
@@ -171,6 +223,7 @@ describe('ensureAdbHealthy', () => {
 
   it('treats probe timeout as failure and triggers recovery', async () => {
     setAdbDevice('192.168.1.10:5555');
+    stubAdbDevicesWith('192.168.1.10:5555');
     let probeCalls = 0;
     mockedExec.execCommandFull.mockImplementation(async (_cmd, args) => {
       const argstr = (args ?? []).join(' ');
