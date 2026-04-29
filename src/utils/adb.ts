@@ -118,6 +118,20 @@ export function checkADBPath(): string {
   }
 }
 
+/** Regex matching a TCP-style adb target (e.g. "192.168.1.1" or "192.168.1.1:5555"). */
+const TCP_DEVICE_REGEX = /^\d+\.\d+\.\d+\.\d+(:\d+)?$/;
+
+/** Returns true if `target` is a TCP-style adb target. */
+function isTcpTarget(target: string): boolean {
+  return TCP_DEVICE_REGEX.test(target);
+}
+
+/** Parse `adb devices` output into the device-line entries (one per device). */
+function parseAdbDevices(output: string): string[] {
+  const lines = output.trim().split('\n').slice(1); // Skip header
+  return lines.filter(line => line.trim() && !line.includes('List of devices'));
+}
+
 /**
  * Restart ADB server if it's in a bad state
  */
@@ -142,13 +156,24 @@ async function restartADBServer(): Promise<boolean> {
 export async function checkADBDevices(retryCount = 0): Promise<boolean> {
   try {
     const target = getAdbDevice();
-    const output = await execCommand('adb', ['devices']);
-    const lines = output.trim().split('\n').slice(1); // Skip header
-    let devices = lines.filter(line => line.trim() && !line.includes('List of devices'));
+    let output = await execCommand('adb', ['devices']);
+    let devices = parseAdbDevices(output);
 
     // If a target device is configured, check it's in the list
     if (target) {
-      const targetOnline = devices.some(line => line.includes(target) && line.includes('device'));
+      let targetOnline = devices.some(line => line.includes(target) && line.includes('device'));
+
+      // TCP target not yet connected — try `adb connect <target>` once.
+      if (!targetOnline && isTcpTarget(target)) {
+        console.log(`Configured device ${target} not connected, running: adb connect ${target}`);
+        const connectResult = await execCommandFull('adb', ['connect', target]);
+        if (connectResult.code === 0) {
+          output = await execCommand('adb', ['devices']);
+          devices = parseAdbDevices(output);
+          targetOnline = devices.some(line => line.includes(target) && line.includes('device'));
+        }
+      }
+
       if (!targetOnline) {
         console.error(`Error: Configured device ${target} not found or offline`);
         console.error('');
@@ -486,7 +511,6 @@ export function formatBatteryInfo(info: BatteryInfo): string {
 // --- ADB health check ---
 
 const ADB_PROBE_TIMEOUT_MS = 3000;
-const TCP_DEVICE_REGEX = /^\d+\.\d+\.\d+\.\d+(:\d+)?$/;
 
 export type AdbHealthStatus =
   | { kind: 'healthy' }
@@ -526,7 +550,7 @@ export async function ensureAdbHealthy(events?: AdbHealthEvents): Promise<AdbHea
   if (lastError === null) return { kind: 'healthy' };
 
   const target = getAdbDevice();
-  const isTcp = target !== undefined && TCP_DEVICE_REGEX.test(target);
+  const isTcp = target !== undefined && isTcpTarget(target);
 
   if (isTcp && target) {
     events?.onReconnecting?.();
