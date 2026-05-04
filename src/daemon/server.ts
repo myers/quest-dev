@@ -8,7 +8,7 @@ import fastifyStatic from "@fastify/static";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPin, loadConfig, tryLoadPin } from "../utils/config.js";
-import { getBatteryInfo } from "../utils/adb.js";
+import { getBatteryInfo, ensureAdbHealthy } from "../utils/adb.js";
 import { execCommand } from "../utils/exec.js";
 import { adbArgs } from "../utils/adb.js";
 import { EYE_LEFT, EYE_RIGHT, EYE_STEREO, RESOLUTIONS, resolveResolution } from "@myerscarpenter/cast2-protocol";
@@ -136,6 +136,10 @@ POST endpoints (JSON body)
       pin = loadPin(req.body?.pin);
     } catch {
       return reply.code(400).send({ ok: false, error: "PIN required" });
+    }
+    const health = await ensureAdbHealthy();
+    if (health.kind === 'failed') {
+      return reply.code(500).send({ ok: false, error: `ADB unresponsive: ${health.error}` });
     }
     try {
       await stayAwake.enable(pin);
