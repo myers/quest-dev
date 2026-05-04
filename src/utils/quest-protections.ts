@@ -1,6 +1,12 @@
 /**
- * Quest protection state via the Meta Scriptable Testing API
- * (content://com.oculus.rc).
+ * Quest protection state.
+ *
+ * Wraps Meta's "Scriptable Testing Services" API (content://com.oculus.rc).
+ * Meta's docs: https://developers.meta.com/horizon/documentation/unity/ts-scriptable-testing/
+ *
+ * We use it to turn Quest protections (guardian, system dialogs, autosleep)
+ * on or off so the headset can be driven from automation without falling
+ * asleep.
  *
  * Shared between stay-awake and cast commands. Internal model is positive-form:
  * `true` means the protection is on (Quest in its normal state). Meta's wire
