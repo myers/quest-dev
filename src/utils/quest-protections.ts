@@ -21,7 +21,11 @@ export interface QuestProtections {
   guardian: boolean;       // true = guardian boundary active (normal)
   dialogs: boolean;        // true = system dialogs shown (normal)
   autosleep: boolean;      // true = headset will sleep when idle (normal)
-  proximityClose: boolean; // true = proximity-close behavior active
+  proximityClose: boolean; // true = real proximity sensor in use (normal:
+                           // headset sleeps when off-head). Wire field
+                           // `set_proximity_close=true` means "force-treat
+                           // sensor as closed" = override = our `false`.
+
 }
 
 /**
