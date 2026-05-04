@@ -7,11 +7,11 @@
 import { execFileSync } from "node:child_process";
 import {
   buildSetPropertyArgs,
-  setTestProperties,
-  getTestProperties,
-  formatTestProperties,
+  setQuestProtections,
+  getQuestProtections,
+  formatQuestProtections,
   type QuestProtections,
-} from "../utils/test-properties.js";
+} from "../utils/quest-protections.js";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs, getAdbDevice } from "../utils/adb.js";
@@ -32,7 +32,7 @@ export class StayAwakeManager {
       return;
     }
     this.pin = pin;
-    await setTestProperties(pin, false);
+    await setQuestProtections(pin, false);
     this.active = true;
     // Wake screen
     try {
@@ -50,7 +50,7 @@ export class StayAwakeManager {
       return;
     }
     try {
-      await setTestProperties(this.pin, true);
+      await setQuestProtections(this.pin, true);
       console.log("Stay-awake off — guardian, dialogs, autosleep on");
     } catch (error) {
       console.error("Failed to turn stay-awake off:", (error as Error).message);
@@ -74,11 +74,11 @@ export class StayAwakeManager {
 
   /** Get current protection status */
   async status(): Promise<QuestProtections> {
-    return getTestProperties();
+    return getQuestProtections();
   }
 
   /** Format status for display */
   formatStatus(props: QuestProtections): string {
-    return formatTestProperties(props);
+    return formatQuestProtections(props);
   }
 }

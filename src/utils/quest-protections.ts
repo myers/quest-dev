@@ -1,12 +1,11 @@
 /**
- * Meta Scriptable Testing API (content://com.oculus.rc) utilities.
+ * Quest protection state via the Meta Scriptable Testing API
+ * (content://com.oculus.rc).
  *
- * Shared between stay-awake and cast commands for managing Quest protections
- * (guardian, autosleep, dialogs, proximity).
- *
- * Internal model is positive-form: `true` means the protection is on (Quest in
- * its normal state). Meta's wire format is negative-form (`disable_*`); we
- * translate at the parser and builder boundaries.
+ * Shared between stay-awake and cast commands. Internal model is positive-form:
+ * `true` means the protection is on (Quest in its normal state). Meta's wire
+ * format is negative-form (`disable_*`); we translate at the parser and
+ * builder boundaries.
  */
 
 import { execCommand, execCommandFull } from "./exec.js";
@@ -44,7 +43,7 @@ export function buildSetPropertyArgs(pin: string, protectionsOn: boolean): strin
  * Output is positive-form: a `disable_*=true` field maps to a positive flag of `false`.
  * Absent fields default to `true` (protection on / normal).
  */
-export function parseTestProperties(output: string): QuestProtections {
+export function parseQuestProtections(output: string): QuestProtections {
   const result: QuestProtections = {
     guardian: true,
     dialogs: true,
@@ -74,7 +73,7 @@ export function parseTestProperties(output: string): QuestProtections {
 /**
  * Call SET_PROPERTY. `protectionsOn=true` restores Quest to normal.
  */
-export async function setTestProperties(
+export async function setQuestProtections(
   pin: string,
   protectionsOn: boolean,
 ): Promise<void> {
@@ -85,19 +84,19 @@ export async function setTestProperties(
 /**
  * Call GET_PROPERTY and return parsed protections.
  */
-export async function getTestProperties(): Promise<QuestProtections> {
+export async function getQuestProtections(): Promise<QuestProtections> {
   const result = await execCommandFull("adb", adbArgs(
     "shell", "content", "call",
     "--uri", "content://com.oculus.rc",
     "--method", "GET_PROPERTY",
   ));
-  return parseTestProperties(result.stdout);
+  return parseQuestProtections(result.stdout);
 }
 
 /**
  * Format protections for display.
  */
-export function formatTestProperties(props: QuestProtections): string {
+export function formatQuestProtections(props: QuestProtections): string {
   const onOff = (b: boolean) => (b ? "on" : "off");
   const lines = [
     `  Guardian:        ${onOff(props.guardian)}`,

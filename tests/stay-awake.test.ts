@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { parseTestProperties, buildSetPropertyArgs } from '../src/commands/stay-awake.js';
+import { parseQuestProtections, buildSetPropertyArgs } from '../src/commands/stay-awake.js';
 
-describe('parseTestProperties', () => {
+describe('parseQuestProtections', () => {
   it('parses a Bundle where every protection is off (stay-awake on)', () => {
     // Wire format uses negative-form names; all `disable_*=true` means everything is off.
     const output = 'Bundle[{disable_guardian=true, set_proximity_close=true, disable_dialogs=true, disable_autosleep=true}]';
-    const props = parseTestProperties(output);
+    const props = parseQuestProtections(output);
     expect(props).toEqual({
       guardian: false,
       proximityClose: false,
@@ -16,7 +16,7 @@ describe('parseTestProperties', () => {
 
   it('parses a Bundle where every protection is on (normal Quest state)', () => {
     const output = 'Bundle[{disable_guardian=false, set_proximity_close=false, disable_dialogs=false, disable_autosleep=false}]';
-    const props = parseTestProperties(output);
+    const props = parseQuestProtections(output);
     expect(props).toEqual({
       guardian: true,
       proximityClose: true,
@@ -26,7 +26,7 @@ describe('parseTestProperties', () => {
   });
 
   it('returns all-on defaults for unparseable output', () => {
-    const props = parseTestProperties('some garbage output');
+    const props = parseQuestProtections('some garbage output');
     expect(props).toEqual({
       guardian: true,
       proximityClose: true,
@@ -36,7 +36,7 @@ describe('parseTestProperties', () => {
   });
 
   it('returns all-on defaults for empty string', () => {
-    const props = parseTestProperties('');
+    const props = parseQuestProtections('');
     expect(props).toEqual({
       guardian: true,
       proximityClose: true,

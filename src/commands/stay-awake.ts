@@ -17,14 +17,14 @@ import * as fs from 'fs';
 import {
   type QuestProtections,
   buildSetPropertyArgs,
-  parseTestProperties,
-  setTestProperties,
-  getTestProperties,
-  formatTestProperties,
-} from '../utils/test-properties.js';
+  parseQuestProtections,
+  setQuestProtections,
+  getQuestProtections,
+  formatQuestProtections,
+} from '../utils/quest-protections.js';
 
 // Re-export for tests
-export { type QuestProtections, buildSetPropertyArgs, parseTestProperties };
+export { type QuestProtections, buildSetPropertyArgs, parseQuestProtections };
 
 /**
  * Wake the Quest screen
@@ -34,13 +34,13 @@ async function wakeScreen(): Promise<void> {
 }
 
 /**
- * Show current test properties status
+ * Show current Quest protection status
  */
 export async function stayAwakeStatus(): Promise<void> {
   checkADBPath();
-  const props = await getTestProperties();
+  const props = await getQuestProtections();
   console.log('Quest protections:');
-  console.log(formatTestProperties(props));
+  console.log(formatQuestProtections(props));
 }
 
 /**
@@ -49,10 +49,10 @@ export async function stayAwakeStatus(): Promise<void> {
 export async function stayAwakeOff(cliPin?: string): Promise<void> {
   checkADBPath();
   const pin = loadPin(cliPin);
-  await setTestProperties(pin, true);
-  const props = await getTestProperties();
+  await setQuestProtections(pin, true);
+  const props = await getQuestProtections();
   console.log('Stay-awake off:');
-  console.log(formatTestProperties(props));
+  console.log(formatQuestProtections(props));
 }
 
 /**
@@ -131,9 +131,9 @@ export async function stayAwakeCommand(
   }
 
   // Show current state
-  const beforeProps = await getTestProperties();
+  const beforeProps = await getQuestProtections();
   console.log('Quest protections (before):');
-  console.log(formatTestProperties(beforeProps));
+  console.log(formatQuestProtections(beforeProps));
 
   // Write PID file
   try {
@@ -161,7 +161,7 @@ export async function stayAwakeCommand(
 
   // Turn stay-awake on (turn Quest protections off)
   try {
-    await setTestProperties(pin, false);
+    await setQuestProtections(pin, false);
     console.log('Stay-awake on — guardian, dialogs, autosleep off');
   } catch (error) {
     console.error('Failed to turn stay-awake on:', (error as Error).message);
