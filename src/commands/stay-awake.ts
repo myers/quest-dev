@@ -1,9 +1,9 @@
 /**
  * Quest stay-awake command
- * Uses Meta Scriptable Testing API (content://com.oculus.rc) to disable
- * autosleep, guardian, and system dialogs for automated testing.
+ * Uses Meta Scriptable Testing API (content://com.oculus.rc) to turn off
+ * Quest protections (autosleep, guardian, system dialogs) for automated testing.
  *
- * Cleanup is critical: with autosleep disabled, the headset drains battery
+ * Cleanup is critical: with autosleep off, the headset drains battery
  * quickly. A watchdog child process ensures cleanup happens even if the
  * parent is killed (TaskStop, terminal close, claude code exit).
  */
@@ -15,7 +15,7 @@ import { execFileSync, spawn, ChildProcess } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import {
-  type TestProperties,
+  type QuestProtections,
   buildSetPropertyArgs,
   parseTestProperties,
   setTestProperties,
@@ -23,8 +23,8 @@ import {
   formatTestProperties,
 } from '../utils/test-properties.js';
 
-// Re-export for backward compatibility with tests
-export { type TestProperties, buildSetPropertyArgs, parseTestProperties };
+// Re-export for tests
+export { type QuestProtections, buildSetPropertyArgs, parseTestProperties };
 
 /**
  * Wake the Quest screen
@@ -39,19 +39,19 @@ async function wakeScreen(): Promise<void> {
 export async function stayAwakeStatus(): Promise<void> {
   checkADBPath();
   const props = await getTestProperties();
-  console.log('Scriptable Testing properties:');
+  console.log('Quest protections:');
   console.log(formatTestProperties(props));
 }
 
 /**
- * Manually disable test mode (restore all properties)
+ * Manually turn stay-awake off (restore all Quest protections)
  */
-export async function stayAwakeDisable(cliPin?: string): Promise<void> {
+export async function stayAwakeOff(cliPin?: string): Promise<void> {
   checkADBPath();
   const pin = loadPin(cliPin);
-  await setTestProperties(pin, false);
+  await setTestProperties(pin, true);
   const props = await getTestProperties();
-  console.log('Test mode disabled:');
+  console.log('Stay-awake off:');
   console.log(formatTestProperties(props));
 }
 
@@ -69,13 +69,13 @@ export async function stayAwakeWatchdog(parentPid: number, pin: string): Promise
       clearInterval(checkParent);
 
       try {
-        const args = adbArgs(...buildSetPropertyArgs(pin, false));
+        const args = adbArgs(...buildSetPropertyArgs(pin, true));
         execFileSync('adb', args, { stdio: 'ignore' });
 
         const pidFile = `${os.homedir()}/.quest-dev-stay-awake.pid`;
         try { fs.unlinkSync(pidFile); } catch {}
 
-        console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
+        console.log('Stay-awake off — guardian, dialogs, autosleep on');
       } catch (err) {
         console.error('Failed to restore settings:', (err as Error).message);
       }
@@ -132,7 +132,7 @@ export async function stayAwakeCommand(
 
   // Show current state
   const beforeProps = await getTestProperties();
-  console.log('Current test properties:');
+  console.log('Quest protections (before):');
   console.log(formatTestProperties(beforeProps));
 
   // Write PID file
@@ -159,12 +159,12 @@ export async function stayAwakeCommand(
     console.warn('Failed to spawn watchdog child process');
   }
 
-  // Enable test mode
+  // Turn stay-awake on (turn Quest protections off)
   try {
-    await setTestProperties(pin, true);
-    console.log('Test mode enabled — guardian, dialogs, and autosleep disabled');
+    await setTestProperties(pin, false);
+    console.log('Stay-awake on — guardian, dialogs, autosleep off');
   } catch (error) {
-    console.error('Failed to enable test mode:', (error as Error).message);
+    console.error('Failed to turn stay-awake on:', (error as Error).message);
     console.error('Requires Quest OS v44+ and a valid Meta Store PIN.');
     process.exit(1);
   }
@@ -219,9 +219,9 @@ export async function stayAwakeCommand(
     try {
       try { fs.unlinkSync(pidFilePath); } catch {}
 
-      const args = adbArgs(...buildSetPropertyArgs(pin, false));
+      const args = adbArgs(...buildSetPropertyArgs(pin, true));
       execFileSync('adb', args, { stdio: 'ignore' });
-      console.log('Test mode disabled — guardian, dialogs, and autosleep restored');
+      console.log('Stay-awake off — guardian, dialogs, autosleep on');
     } catch (error) {
       console.error('Failed to restore settings:', (error as Error).message);
     }

@@ -11,7 +11,7 @@ async function makeApp(opts?: { pin?: string | null }): Promise<FastifyInstance>
   vi.spyOn(configMod, 'tryLoadPin').mockReturnValue(pinValue);
 
   const app = Fastify({ logger: false });
-  const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+  const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
   const logcat = {
     start: vi.fn(),
     status: () => ({ file: '/tmp/fake.log' }),

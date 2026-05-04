@@ -1,6 +1,7 @@
 /**
  * Stay-awake manager for the daemon process.
- * Extracted from stay-awake.ts — manages test properties lifecycle.
+ * Manages Quest protections lifecycle (turning them off so the headset stays
+ * awake, and restoring them on cleanup).
  */
 
 import { execFileSync } from "node:child_process";
@@ -9,75 +10,75 @@ import {
   setTestProperties,
   getTestProperties,
   formatTestProperties,
-  type TestProperties,
+  type QuestProtections,
 } from "../utils/test-properties.js";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs, getAdbDevice } from "../utils/adb.js";
 
 export class StayAwakeManager {
-  private enabled = false;
+  private active = false;
   private pin: string | undefined;
 
-  /** Whether stay-awake is currently enabled */
+  /** Whether stay-awake is currently on */
   get isEnabled(): boolean {
-    return this.enabled;
+    return this.active;
   }
 
-  /** Enable test properties (guardian, dialogs, autosleep, proximity) */
-  async enable(pin: string): Promise<void> {
-    if (this.enabled) {
-      verbose("stay-awake already enabled");
+  /** Turn stay-awake on (turn Quest protections off) */
+  async turnOn(pin: string): Promise<void> {
+    if (this.active) {
+      verbose("stay-awake already on");
       return;
     }
     this.pin = pin;
-    await setTestProperties(pin, true);
-    this.enabled = true;
+    await setTestProperties(pin, false);
+    this.active = true;
     // Wake screen
     try {
       await execCommand("adb", adbArgs("shell", "input", "keyevent", "KEYCODE_WAKEUP"));
     } catch {
       // Non-fatal
     }
-    console.log("Stay-awake enabled (guardian, dialogs, autosleep disabled)");
+    console.log("Stay-awake on — guardian, dialogs, autosleep off");
   }
 
-  /** Disable test properties (restore Quest to normal) */
-  async disable(): Promise<void> {
-    if (!this.enabled || !this.pin) {
-      verbose("stay-awake not enabled, nothing to disable");
+  /** Turn stay-awake off (restore Quest protections) */
+  async turnOff(): Promise<void> {
+    if (!this.active || !this.pin) {
+      verbose("stay-awake already off");
       return;
     }
     try {
-      await setTestProperties(this.pin, false);
-      console.log("Stay-awake disabled (guardian, dialogs, autosleep restored)");
+      await setTestProperties(this.pin, true);
+      console.log("Stay-awake off — guardian, dialogs, autosleep on");
     } catch (error) {
-      console.error("Failed to disable stay-awake:", (error as Error).message);
+      console.error("Failed to turn stay-awake off:", (error as Error).message);
     }
-    this.enabled = false;
+    this.active = false;
   }
 
   /** Synchronous cleanup for signal handlers */
   cleanupSync(): void {
-    if (!this.enabled || !this.pin) return;
+    if (!this.active || !this.pin) return;
     try {
-      const args = buildSetPropertyArgs(this.pin, false);
+      const args = buildSetPropertyArgs(this.pin, true);
       const device = getAdbDevice();
       const adb = device ? ["-s", device, ...args] : args;
       execFileSync("adb", adb, { stdio: "ignore" });
     } catch {
       // Best-effort
     }
-    this.enabled = false;
+    this.active = false;
   }
 
-  /** Get current test property status */
-  async status(): Promise<TestProperties> {
+  /** Get current protection status */
+  async status(): Promise<QuestProtections> {
     return getTestProperties();
   }
 
   /** Format status for display */
-  formatStatus(props: TestProperties): string {
+  formatStatus(props: QuestProtections): string {
     return formatTestProperties(props);
   }
 }

@@ -220,7 +220,7 @@ export async function deploy(
   } else {
     onEvent({ type: 'stay_awake', status: 'enabling' });
     try {
-      await stayAwake.enable(pin);
+      await stayAwake.turnOn(pin);
       onEvent({ type: 'stay_awake', status: 'enabled' });
     } catch (error) {
       const message = (error as Error).message;

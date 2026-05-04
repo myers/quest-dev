@@ -1,77 +1,91 @@
 /**
  * Meta Scriptable Testing API (content://com.oculus.rc) utilities.
  *
- * Shared between stay-awake and cast commands for managing test mode
- * properties (guardian, autosleep, dialogs, proximity).
+ * Shared between stay-awake and cast commands for managing Quest protections
+ * (guardian, autosleep, dialogs, proximity).
+ *
+ * Internal model is positive-form: `true` means the protection is on (Quest in
+ * its normal state). Meta's wire format is negative-form (`disable_*`); we
+ * translate at the parser and builder boundaries.
  */
 
 import { execCommand, execCommandFull } from "./exec.js";
 import { adbArgs } from "./adb.js";
 
-export interface TestProperties {
-  disable_guardian: boolean;
-  disable_dialogs: boolean;
-  disable_autosleep: boolean;
-  set_proximity_close: boolean;
+export interface QuestProtections {
+  guardian: boolean;       // true = guardian boundary active (normal)
+  dialogs: boolean;        // true = system dialogs shown (normal)
+  autosleep: boolean;      // true = headset will sleep when idle (normal)
+  proximityClose: boolean; // true = proximity-close behavior active
 }
 
 /**
  * Build ADB args for SET_PROPERTY call.
+ * `protectionsOn=true` restores normal Quest behavior; `false` turns
+ * protections off so the headset stays awake for testing.
  */
-export function buildSetPropertyArgs(pin: string, enabled: boolean): string[] {
+export function buildSetPropertyArgs(pin: string, protectionsOn: boolean): string[] {
+  const disable = !protectionsOn;
   return [
     "shell", "content", "call",
     "--uri", "content://com.oculus.rc",
     "--method", "SET_PROPERTY",
-    "--extra", `disable_guardian:b:${enabled}`,
-    "--extra", `disable_dialogs:b:${enabled}`,
-    "--extra", `disable_autosleep:b:${enabled}`,
-    "--extra", `set_proximity_close:b:${enabled}`,
+    "--extra", `disable_guardian:b:${disable}`,
+    "--extra", `disable_dialogs:b:${disable}`,
+    "--extra", `disable_autosleep:b:${disable}`,
+    "--extra", `set_proximity_close:b:${disable}`,
     "--extra", `PIN:s:${pin}`,
   ];
 }
 
 /**
  * Parse GET_PROPERTY Bundle output into structured data.
- * Input: "Bundle[{disable_guardian=true, set_proximity_close=true, ...}]"
+ * Input wire format: "Bundle[{disable_guardian=true, set_proximity_close=true, ...}]"
+ * Output is positive-form: a `disable_*=true` field maps to a positive flag of `false`.
+ * Absent fields default to `true` (protection on / normal).
  */
-export function parseTestProperties(output: string): TestProperties {
-  const defaults: TestProperties = {
-    disable_guardian: false,
-    disable_dialogs: false,
-    disable_autosleep: false,
-    set_proximity_close: false,
+export function parseTestProperties(output: string): QuestProtections {
+  const result: QuestProtections = {
+    guardian: true,
+    dialogs: true,
+    autosleep: true,
+    proximityClose: true,
   };
 
   const match = output.match(/Bundle\[\{(.+)\}\]/);
-  if (!match) return defaults;
+  if (!match) return result;
 
   const pairs = match[1].split(",").map((s) => s.trim());
   for (const pair of pairs) {
     const [key, value] = pair.split("=");
-    if (key && value && key in defaults) {
-      defaults[key as keyof TestProperties] = value === "true";
+    if (!key || !value) continue;
+    const isTrue = value === "true";
+    switch (key) {
+      case "disable_guardian":     result.guardian = !isTrue; break;
+      case "disable_dialogs":      result.dialogs = !isTrue; break;
+      case "disable_autosleep":    result.autosleep = !isTrue; break;
+      case "set_proximity_close":  result.proximityClose = !isTrue; break;
     }
   }
 
-  return defaults;
+  return result;
 }
 
 /**
- * Call SET_PROPERTY to enable or disable test mode.
+ * Call SET_PROPERTY. `protectionsOn=true` restores Quest to normal.
  */
 export async function setTestProperties(
   pin: string,
-  enabled: boolean,
+  protectionsOn: boolean,
 ): Promise<void> {
-  const args = adbArgs(...buildSetPropertyArgs(pin, enabled));
+  const args = adbArgs(...buildSetPropertyArgs(pin, protectionsOn));
   await execCommand("adb", args);
 }
 
 /**
- * Call GET_PROPERTY and return parsed test properties.
+ * Call GET_PROPERTY and return parsed protections.
  */
-export async function getTestProperties(): Promise<TestProperties> {
+export async function getTestProperties(): Promise<QuestProtections> {
   const result = await execCommandFull("adb", adbArgs(
     "shell", "content", "call",
     "--uri", "content://com.oculus.rc",
@@ -81,14 +95,15 @@ export async function getTestProperties(): Promise<TestProperties> {
 }
 
 /**
- * Format test properties for display.
+ * Format protections for display.
  */
-export function formatTestProperties(props: TestProperties): string {
+export function formatTestProperties(props: QuestProtections): string {
+  const onOff = (b: boolean) => (b ? "on" : "off");
   const lines = [
-    `  Guardian disabled:  ${props.disable_guardian}`,
-    `  Dialogs disabled:  ${props.disable_dialogs}`,
-    `  Autosleep disabled: ${props.disable_autosleep}`,
-    `  Proximity close:   ${props.set_proximity_close}`,
+    `  Guardian:        ${onOff(props.guardian)}`,
+    `  Dialogs:         ${onOff(props.dialogs)}`,
+    `  Autosleep:       ${onOff(props.autosleep)}`,
+    `  Proximity close: ${onOff(props.proximityClose)}`,
   ];
   return lines.join("\n");
 }

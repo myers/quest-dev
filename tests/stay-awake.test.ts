@@ -2,52 +2,53 @@ import { describe, it, expect } from 'vitest';
 import { parseTestProperties, buildSetPropertyArgs } from '../src/commands/stay-awake.js';
 
 describe('parseTestProperties', () => {
-  it('parses a full Bundle output', () => {
+  it('parses a Bundle where every protection is off (stay-awake on)', () => {
+    // Wire format uses negative-form names; all `disable_*=true` means everything is off.
     const output = 'Bundle[{disable_guardian=true, set_proximity_close=true, disable_dialogs=true, disable_autosleep=true}]';
     const props = parseTestProperties(output);
     expect(props).toEqual({
-      disable_guardian: true,
-      set_proximity_close: true,
-      disable_dialogs: true,
-      disable_autosleep: true,
+      guardian: false,
+      proximityClose: false,
+      dialogs: false,
+      autosleep: false,
     });
   });
 
-  it('parses Bundle with false values', () => {
+  it('parses a Bundle where every protection is on (normal Quest state)', () => {
     const output = 'Bundle[{disable_guardian=false, set_proximity_close=false, disable_dialogs=false, disable_autosleep=false}]';
     const props = parseTestProperties(output);
     expect(props).toEqual({
-      disable_guardian: false,
-      set_proximity_close: false,
-      disable_dialogs: false,
-      disable_autosleep: false,
+      guardian: true,
+      proximityClose: true,
+      dialogs: true,
+      autosleep: true,
     });
   });
 
-  it('returns defaults for unparseable output', () => {
+  it('returns all-on defaults for unparseable output', () => {
     const props = parseTestProperties('some garbage output');
     expect(props).toEqual({
-      disable_guardian: false,
-      set_proximity_close: false,
-      disable_dialogs: false,
-      disable_autosleep: false,
+      guardian: true,
+      proximityClose: true,
+      dialogs: true,
+      autosleep: true,
     });
   });
 
-  it('returns defaults for empty string', () => {
+  it('returns all-on defaults for empty string', () => {
     const props = parseTestProperties('');
     expect(props).toEqual({
-      disable_guardian: false,
-      set_proximity_close: false,
-      disable_dialogs: false,
-      disable_autosleep: false,
+      guardian: true,
+      proximityClose: true,
+      dialogs: true,
+      autosleep: true,
     });
   });
 });
 
 describe('buildSetPropertyArgs', () => {
-  it('builds enable args with correct PIN', () => {
-    const args = buildSetPropertyArgs('5678', true);
+  it('builds args to turn protections off (stay-awake on)', () => {
+    const args = buildSetPropertyArgs('5678', false);
     expect(args).toEqual([
       'shell', 'content', 'call',
       '--uri', 'content://com.oculus.rc',
@@ -60,8 +61,8 @@ describe('buildSetPropertyArgs', () => {
     ]);
   });
 
-  it('builds disable args', () => {
-    const args = buildSetPropertyArgs('1234', false);
+  it('builds args to turn protections on (stay-awake off)', () => {
+    const args = buildSetPropertyArgs('1234', true);
     expect(args).toContain('disable_guardian:b:false');
     expect(args).toContain('disable_dialogs:b:false');
     expect(args).toContain('disable_autosleep:b:false');

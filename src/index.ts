@@ -15,7 +15,7 @@ import { castScreenshotCommand, type CastEyeMode } from './commands/cast-screens
 import { openCommand } from './commands/open.js';
 import { tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
-import { stayAwakeStatus, stayAwakeDisable } from './commands/stay-awake.js';
+import { stayAwakeStatus, stayAwakeOff } from './commands/stay-awake.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
 import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, daemonFetchNdjson, resolvePort, resolveHost, DaemonDeviceMismatchError } from './daemon/client.js';
@@ -312,7 +312,7 @@ cli.command(
 // Stay-awake command — delegates to daemon
 cli.command(
   'stay-awake',
-  'Keep Quest awake (disables autosleep, guardian, dialogs) via daemon',
+  'Keep Quest awake (turns off autosleep, guardian, dialogs) via daemon',
   (yargs) => {
     return yargs
       .option('pin', {
@@ -328,8 +328,8 @@ cli.command(
         describe: 'Exit when battery drops to this percentage (default: 10, or save with: quest-dev config)',
         type: 'number',
       })
-      .option('disable', {
-        describe: 'Manually restore all test properties and exit',
+      .option('off', {
+        describe: 'Turn stay-awake off (restore Quest protections) and exit',
         type: 'boolean',
         default: false,
       })
@@ -345,14 +345,14 @@ cli.command(
       await stayAwakeStatus();
       return;
     }
-    if (argv.disable) {
+    if (argv.off) {
       // Try daemon first, fall back to direct
       const existing = discoverDaemon();
       if (existing) {
         await daemonFetch(existing, '/stay-awake/disable', { method: 'POST' });
-        console.log('Stay-awake disabled via daemon');
+        console.log('Stay-awake off via daemon');
       } else {
-        await stayAwakeDisable(argv.pin as string | undefined);
+        await stayAwakeOff(argv.pin as string | undefined);
       }
       return;
     }
@@ -369,10 +369,10 @@ cli.command(
       body: { pin: argv.pin },
     }) as { ok: boolean; error?: string };
     if (result.ok) {
-      console.log('Stay-awake enabled via daemon');
+      console.log('Stay-awake on via daemon');
       console.log(`Daemon PID: ${info.pid}, port: ${info.port}`);
     } else {
-      console.error('Failed to enable stay-awake:', result.error);
+      console.error('Failed to turn stay-awake on:', result.error);
       process.exit(1);
     }
   }

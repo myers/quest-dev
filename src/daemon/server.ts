@@ -142,7 +142,7 @@ POST endpoints (JSON body)
       return reply.code(500).send({ ok: false, error: `ADB unresponsive: ${health.error}` });
     }
     try {
-      await stayAwake.enable(pin);
+      await stayAwake.turnOn(pin);
       return { ok: true };
     } catch (error) {
       return reply.code(500).send({ ok: false, error: (error as Error).message });
@@ -150,7 +150,7 @@ POST endpoints (JSON body)
   });
 
   app.post("/stay-awake/disable", async () => {
-    await stayAwake.disable();
+    await stayAwake.turnOff();
     return { ok: true };
   });
 

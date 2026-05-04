@@ -84,7 +84,7 @@ describe('deploy() event sequence', () => {
 
   it('emits already_enabled when stay-awake is already on', async () => {
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
 
     await deploy(
       { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
@@ -93,14 +93,14 @@ describe('deploy() event sequence', () => {
     );
 
     expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'already_enabled' });
-    expect(stayAwake.enable).not.toHaveBeenCalled();
+    expect(stayAwake.turnOn).not.toHaveBeenCalled();
     // Last event is still the existing APK-missing failure.
     expect(events.at(-1)).toMatchObject({ type: 'done', ok: false, error: expect.stringContaining('APK not found') });
   });
 
   it('emits enabling then enabled when stay-awake activates successfully', async () => {
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: false, enable: vi.fn().mockResolvedValue(undefined) } as any;
+    const stayAwake = { isEnabled: false, turnOn: vi.fn().mockResolvedValue(undefined) } as any;
 
     await deploy(
       { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
@@ -110,14 +110,14 @@ describe('deploy() event sequence', () => {
 
     expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'enabling' });
     expect(events[1]).toMatchObject({ type: 'stay_awake', status: 'enabled' });
-    expect(stayAwake.enable).toHaveBeenCalledWith('1234');
+    expect(stayAwake.turnOn).toHaveBeenCalledWith('1234');
   });
 
   it('emits failed and aborts deploy when stay-awake activation throws', async () => {
     const { events, push } = collectDeployEvents();
     const stayAwake = {
       isEnabled: false,
-      enable: vi.fn().mockRejectedValue(new Error('PIN rejected')),
+      turnOn: vi.fn().mockRejectedValue(new Error('PIN rejected')),
     } as any;
     const logcat = fakeLogcat();
 
@@ -141,7 +141,7 @@ describe('deploy() event sequence', () => {
 
   it('emits a done event for an APK that does not exist', async () => {
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
 
     await deploy(
       { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
@@ -167,7 +167,7 @@ describe('deploy() event sequence', () => {
       });
 
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
 
     await deploy(
       { apkPath: '/some/path.apk', pin: '1234', onEvent: push },
@@ -183,7 +183,7 @@ describe('deploy() event sequence', () => {
       error: expect.stringContaining('ADB unresponsive'),
     });
     // Stay-awake must NOT have been touched.
-    expect(stayAwake.enable).not.toHaveBeenCalled();
+    expect(stayAwake.turnOn).not.toHaveBeenCalled();
     // Only adb_health + done should have been emitted (no stay_awake).
     expect(events.find((e) => e.type === 'stay_awake')).toBeUndefined();
     spy.mockRestore();
@@ -196,7 +196,7 @@ describe('deploy() event sequence', () => {
       .mockResolvedValue({ kind: 'healthy' });
 
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, enable: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
 
     await deploy(
       { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
