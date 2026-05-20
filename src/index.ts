@@ -23,6 +23,17 @@ import type { DeployEvent, DeployResult } from './daemon/deploy.js';
 import { startDaemon } from './daemon/daemon.js';
 import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
 
+// Suppress adb's localhost emulator autoscan. By default adb probes
+// localhost ports 5555-5585 for emulators; if any unrelated service is
+// listening there (a stray emulator, a containerised Android, etc.) adb
+// registers a bogus `emulator-5554 offline` transport, which then makes
+// bare adb commands ambiguous ("more than one device/emulator"). quest-dev
+// only ever talks to a Quest (a USB serial or a network ip:port), never a
+// localhost emulator, so an empty scan range (max < 5555) is always safe.
+// Children spawned via exec.ts inherit this; only applied if unset so a
+// user who deliberately wants emulator scanning is not overridden.
+process.env.ADB_LOCAL_TRANSPORT_MAX_PORT ??= '5554';
+
 // Read version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(
