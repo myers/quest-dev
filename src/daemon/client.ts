@@ -44,6 +44,16 @@ export function discoverDaemon(): DaemonInfo | null {
   return null;
 }
 
+/**
+ * Mark the daemon active by sending it SIGUSR1, which its handler routes
+ * to resetIdleTimer(). Long-running sessions call this (via `quest-dev
+ * ping`) so the daemon survives a run it would otherwise idle out of.
+ * Throws if the PID is no longer alive.
+ */
+export function sendDaemonPing(info: DaemonInfo): void {
+  process.kill(info.pid, "SIGUSR1");
+}
+
 export interface SpawnDaemonOptions {
   port: number;
   device?: string;

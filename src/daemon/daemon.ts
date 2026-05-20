@@ -50,7 +50,14 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<void> {
   const logcat = new LogcatManager();
   const castManager = new CastManager(device);
 
-  // Idle timer
+  // Idle timer. When the daemon goes `idleTimeout` ms with no activity it
+  // shuts down — which releases stay-awake and lets the Quest power off.
+  // That auto-off is INTENTIONAL: agent-driven workflows idle for long
+  // stretches, and leaving the headset powered adds physical wear. Do NOT
+  // "fix" a daemon-dies-mid-task bug by disabling or greatly extending
+  // this timeout. The correct fix is for an active session to mark itself
+  // alive — send SIGUSR1 (see the `quest-dev ping` command), which the
+  // handler below routes to resetIdleTimer().
   let idleHandle: NodeJS.Timeout | null = null;
 
   const resetIdleTimer = () => {
@@ -123,7 +130,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<void> {
   process.on("SIGTERM", shutdown);
   process.on("SIGHUP", shutdown);
 
-  // SIGUSR1 resets idle timer (used by Claude Code hooks)
+  // SIGUSR1 marks the daemon active and resets the idle timer. Sent by
+  // Claude Code hooks and by `quest-dev ping` — which long-running test
+  // sessions call periodically so the daemon survives the run.
   process.on("SIGUSR1", () => {
     const now = new Date().toLocaleTimeString();
     console.log(`[${now}] Activity detected, resetting idle timer`);

@@ -18,7 +18,7 @@ import { batteryCommand } from './commands/battery.js';
 import { stayAwakeStatus, stayAwakeOff } from './commands/stay-awake.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
-import { ensureDaemon, daemonRequest, discoverDaemon, daemonFetch, daemonFetchNdjson, resolvePort, resolveHost, DaemonDeviceMismatchError } from './daemon/client.js';
+import { ensureDaemon, daemonRequest, discoverDaemon, sendDaemonPing, daemonFetch, daemonFetchNdjson, resolvePort, resolveHost, DaemonDeviceMismatchError } from './daemon/client.js';
 import type { DeployEvent, DeployResult } from './daemon/deploy.js';
 import { startDaemon } from './daemon/daemon.js';
 import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
@@ -596,6 +596,23 @@ cli.command(
     } catch {
       console.log('Daemon is not responding (may already be stopped)');
     }
+  }
+);
+
+// Ping command — marks a session active so the daemon doesn't idle out
+cli.command(
+  'ping',
+  "Reset the daemon's idle timer (keeps it alive during a long session)",
+  () => {},
+  async () => {
+    const info = discoverDaemon();
+    if (!info) {
+      console.error('No quest-dev daemon is running — nothing to ping.');
+      process.exitCode = 1;
+      return;
+    }
+    sendDaemonPing(info);
+    console.log(`Pinged daemon (PID ${info.pid}) — idle timer reset.`);
   }
 );
 
