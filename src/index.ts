@@ -468,6 +468,18 @@ cli.command(
           console.log(`Package: ${event.package}`);
           console.log(`Installing APK (${event.apkSizeMB} MB)${event.incremental ? ' [incremental]' : ''}...`);
           break;
+        case 'port_conflict_resolved':
+          for (const s of event.stopped) {
+            console.log(
+              `Port ${event.port} was held by ${s.packageName} (uid ${s.uid}); force-stopped it.`,
+            );
+          }
+          for (const s of event.skipped) {
+            console.warn(
+              `Port ${event.port} is held by uid ${s.uid} (unknown package); deploy may collide.`,
+            );
+          }
+          break;
         case 'install_progress':
           process.stdout.write(`\r  Streaming: ${event.blocks}/${event.totalBlocks} blocks (${event.pct}%)`);
           break;

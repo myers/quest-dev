@@ -217,7 +217,13 @@ POST endpoints (JSON body)
 
       try {
         await deploy(
-          { apkPath: apk_path, pin, crashWaitMs: crash_wait_ms, onEvent: writeEvent },
+          {
+            apkPath: apk_path,
+            pin,
+            crashWaitMs: crash_wait_ms,
+            onEvent: writeEvent,
+            adb: (args) => execCommand("adb", adbArgs(...args)),
+          },
           stayAwake,
           logcat,
         );

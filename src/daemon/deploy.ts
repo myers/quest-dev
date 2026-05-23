@@ -10,14 +10,37 @@ import { execCommand, execCommandFull } from "../utils/exec.js";
 import type { ExecResult } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs, ensureAdbHealthy } from "../utils/adb.js";
+import {
+  resolvePortConflicts,
+  type AdbCommandRunner,
+} from "../utils/port-owners.js";
 import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
+
+/** Bevy BRP's hard-coded default HTTP port. */
+const DEFAULT_BRP_PORT = 15702;
 
 export interface DeployOptions {
   apkPath: string;
   pin: string;
   crashWaitMs?: number;
   onEvent: (event: DeployEvent) => void;
+  /**
+   * Adb command runner. When supplied, deploy() uses it to scan for and
+   * force-stop orphan apps holding the BRP port before install. Tests
+   * inject a mock; production wires the real `adb` binary via adbArgs().
+   */
+  adb?: AdbCommandRunner;
+  /**
+   * Target package name. When supplied, skips APK package-name extraction.
+   * Used by tests to drive the port-conflict path without a real APK.
+   */
+  targetPackage?: string;
+  /**
+   * Port to scan for conflicting LISTEN sockets. Defaults to Bevy BRP's
+   * hard-coded 15702. Tests override.
+   */
+  brpPort?: number;
 }
 
 export interface InstallInfo {
@@ -40,6 +63,12 @@ export type DeployEvent =
   | { type: 'adb_health'; status: 'failed'; error: string }
   | { type: 'stay_awake'; status: 'already_enabled' | 'enabling' | 'enabled' | 'failed'; error?: string }
   | { type: 'started'; package: string; apkSizeMB: number; incremental: boolean }
+  | {
+      type: 'port_conflict_resolved';
+      port: number;
+      stopped: Array<{ packageName: string; uid: number }>;
+      skipped: Array<{ uid: number; packageName: string | null }>;
+    }
   | { type: 'install_progress'; blocks: number; totalBlocks: number; pct: number }
   | { type: 'installed'; installSecs: number; blocksTransferred?: number; totalBlocks?: number; bytesTransferred?: number }
   | { type: 'launching' }
@@ -250,19 +279,48 @@ export async function deploy(
     console.warn(`\n⚠️  APK is ${mins}m${secs}s old — you may be deploying stale code!\n`);
   }
 
-  // Extract package name
+  // Extract package name (or use the caller-provided override).
   let packageName: string;
-  try {
-    packageName = await extractPackageName(absPath);
-  } catch (error) {
-    onEvent({ type: 'done', ok: false, package: "", crashed: false, error: (error as Error).message });
-    return;
+  if (options.targetPackage) {
+    packageName = options.targetPackage;
+  } else {
+    try {
+      packageName = await extractPackageName(absPath);
+    } catch (error) {
+      onEvent({ type: 'done', ok: false, package: "", crashed: false, error: (error as Error).message });
+      return;
+    }
   }
 
   const apkSizeMB = parseFloat((statSync(absPath).size / 1_048_576).toFixed(1));
   const hasIdsig = existsSync(`${absPath}.idsig`);
 
   onEvent({ type: 'started', package: packageName, apkSizeMB, incremental: hasIdsig });
+
+  // Detect and resolve orphan-Bevy-app port conflicts. This catches the
+  // scenario where a previously-launched Bevy app still holds BRP port
+  // 15702, so the freshly-deployed app silently fails to rebind and BRP
+  // clients end up waiting on the orphan's possibly-suspended schedule.
+  if (options.adb) {
+    try {
+      const report = await resolvePortConflicts({
+        port: options.brpPort ?? DEFAULT_BRP_PORT,
+        targetPackage: packageName,
+        adb: options.adb,
+      });
+      if (report.stopped.length > 0 || report.skipped.length > 0) {
+        onEvent({
+          type: 'port_conflict_resolved',
+          port: options.brpPort ?? DEFAULT_BRP_PORT,
+          stopped: report.stopped,
+          skipped: report.skipped,
+        });
+      }
+    } catch (error) {
+      // Non-fatal: log via verbose, continue with the deploy.
+      verbose(`port-conflict scan failed: ${(error as Error).message}`);
+    }
+  }
 
   // Force-stop existing app
   try {

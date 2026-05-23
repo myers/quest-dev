@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { parseIncrementalProgress, type ProgressUpdate, collectDeployEvents, deploy, type DeployEvent } from '../../src/daemon/deploy.js';
 import { vi } from 'vitest';
 import * as adbModuleNs from '../../src/utils/adb.js';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 describe('parseIncrementalProgress', () => {
   it('emits one update per ~10% of total, plus a final transferred update', () => {
@@ -65,6 +68,7 @@ describe('DeployEvent type', () => {
     ];
     expect(events).toHaveLength(14);
   });
+
 });
 
 describe('deploy() event sequence', () => {
@@ -208,5 +212,64 @@ describe('deploy() event sequence', () => {
     // First event should be the existing already_enabled stay-awake event.
     expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'already_enabled' });
     spy.mockRestore();
+  });
+
+  it('emits a port_conflict_resolved event before install when an orphan app holds the BRP port', async () => {
+    const { events, push } = collectDeployEvents();
+    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
+
+    // Write a real (non-APK) file so deploy() passes its existsSync check.
+    // We provide `targetPackage` to bypass APK package-name extraction,
+    // which would fail on this fake file.
+    const fakeApk = join(tmpdir(), `port-conflict-test-${process.pid}.apk`);
+    writeFileSync(fakeApk, 'not-a-real-apk');
+
+    const forceStopped: string[] = [];
+    const adb = vi.fn(async (args: string[]) => {
+      if (args.includes('cat') && args.includes('/proc/net/tcp')) {
+        return [
+          '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+          '   0: 00000000:3D56 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10183        0 1955097 1 0000000000000000 99 0 0 10 0',
+        ].join('\n');
+      }
+      if (args.includes('cat') && args.includes('/proc/net/tcp6')) return '';
+      if (args.includes('pm') && args.includes('list')) {
+        return 'package:com.bevychromium uid:10183\n';
+      }
+      if (args.includes('am') && args.includes('force-stop')) {
+        forceStopped.push(args[args.indexOf('force-stop') + 1]);
+        return '';
+      }
+      // Anything else (install, launch, pidof) — return empty so deploy()
+      // bails out with its own non-port-conflict error path.
+      return '';
+    });
+
+    try {
+      await deploy(
+        {
+          apkPath: fakeApk,
+          pin: '1234',
+          onEvent: push,
+          adb,
+          targetPackage: 'net.monoloco.keyboarddemo',
+          brpPort: 15702,
+        },
+        stayAwake,
+        fakeLogcat(),
+      );
+    } finally {
+      try { unlinkSync(fakeApk); } catch { /* ignore */ }
+    }
+
+    const portEvent = events.find((e) => e.type === 'port_conflict_resolved');
+    expect(portEvent).toBeDefined();
+    if (portEvent && portEvent.type === 'port_conflict_resolved') {
+      expect(portEvent.port).toBe(15702);
+      expect(portEvent.stopped).toEqual([
+        { packageName: 'com.bevychromium', uid: 10183 },
+      ]);
+    }
+    expect(forceStopped).toEqual(['com.bevychromium']);
   });
 });
