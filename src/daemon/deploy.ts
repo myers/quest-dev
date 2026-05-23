@@ -17,8 +17,14 @@ import {
 import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 
-/** Bevy BRP's hard-coded default HTTP port. */
-const DEFAULT_BRP_PORT = 15702;
+/**
+ * Default debugging port to scan for conflicts. 15702 is Bevy BRP's
+ * hard-coded HTTP port; other engines/frameworks bind different ports
+ * (e.g. React Native Metro 8081, Flutter DDS dynamic). Override via the
+ * `debuggingPort` option, the `debuggingPort` config key, or the
+ * `--debugging-port` CLI flag.
+ */
+const DEFAULT_DEBUGGING_PORT = 15702;
 
 export interface DeployOptions {
   apkPath: string;
@@ -27,8 +33,9 @@ export interface DeployOptions {
   onEvent: (event: DeployEvent) => void;
   /**
    * Adb command runner. When supplied, deploy() uses it to scan for and
-   * force-stop orphan apps holding the BRP port before install. Tests
-   * inject a mock; production wires the real `adb` binary via adbArgs().
+   * force-stop orphan apps holding the debugging port before install.
+   * Tests inject a mock; production wires the real `adb` binary via
+   * adbArgs().
    */
   adb?: AdbCommandRunner;
   /**
@@ -37,10 +44,11 @@ export interface DeployOptions {
    */
   targetPackage?: string;
   /**
-   * Port to scan for conflicting LISTEN sockets. Defaults to Bevy BRP's
-   * hard-coded 15702. Tests override.
+   * TCP port to scan for conflicting LISTEN sockets. Defaults to 15702
+   * (Bevy BRP). Set for other frameworks (React Native Metro 8081,
+   * Flutter DDS, custom RPC servers, etc.).
    */
-  brpPort?: number;
+  debuggingPort?: number;
 }
 
 export interface InstallInfo {
@@ -297,21 +305,23 @@ export async function deploy(
 
   onEvent({ type: 'started', package: packageName, apkSizeMB, incremental: hasIdsig });
 
-  // Detect and resolve orphan-Bevy-app port conflicts. This catches the
-  // scenario where a previously-launched Bevy app still holds BRP port
-  // 15702, so the freshly-deployed app silently fails to rebind and BRP
-  // clients end up waiting on the orphan's possibly-suspended schedule.
+  // Detect and resolve orphan-app debugging-port conflicts. This catches
+  // the scenario where a previously-launched app still holds the
+  // debugging port (e.g. Bevy BRP 15702), so the freshly-deployed app
+  // silently fails to rebind and clients end up waiting on the orphan's
+  // possibly-suspended state.
   if (options.adb) {
+    const debuggingPort = options.debuggingPort ?? DEFAULT_DEBUGGING_PORT;
     try {
       const report = await resolvePortConflicts({
-        port: options.brpPort ?? DEFAULT_BRP_PORT,
+        port: debuggingPort,
         targetPackage: packageName,
         adb: options.adb,
       });
       if (report.stopped.length > 0 || report.skipped.length > 0) {
         onEvent({
           type: 'port_conflict_resolved',
-          port: options.brpPort ?? DEFAULT_BRP_PORT,
+          port: debuggingPort,
           stopped: report.stopped,
           skipped: report.skipped,
         });

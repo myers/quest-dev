@@ -1,10 +1,11 @@
 /**
  * Identify the Android processes holding a given TCP port LISTEN socket.
  *
- * Used at deploy time to detect the orphan-Bevy-app scenario: a previous
- * Bevy app is still bound to BRP port 15702, so the freshly-deployed app
- * silently fails to rebind and clients end up talking to (and waiting on)
- * the previous app's possibly-suspended schedule.
+ * Used at deploy time to detect the orphan-app scenario: a previously-
+ * launched app is still bound to its debugging/RPC port (e.g. Bevy BRP
+ * 15702, React Native Metro 8081, Flutter DDS), so the freshly-deployed
+ * app silently fails to rebind and clients end up talking to (and
+ * waiting on) the previous instance.
  */
 
 export interface PortListener {

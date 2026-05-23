@@ -187,10 +187,10 @@ POST endpoints (JSON body)
 
   // --- Deploy endpoint ---
 
-  app.post<{ Body: { apk_path: string; crash_wait_ms?: number } }>(
+  app.post<{ Body: { apk_path: string; crash_wait_ms?: number; debugging_port?: number } }>(
     "/deploy",
     async (req, reply) => {
-      const { apk_path, crash_wait_ms } = req.body ?? {};
+      const { apk_path, crash_wait_ms, debugging_port } = req.body ?? {};
       if (!apk_path) {
         return reply.code(400).send({ ok: false, error: "apk_path required" });
       }
@@ -223,6 +223,7 @@ POST endpoints (JSON body)
             crashWaitMs: crash_wait_ms,
             onEvent: writeEvent,
             adb: (args) => execCommand("adb", adbArgs(...args)),
+            debuggingPort: debugging_port,
           },
           stayAwake,
           logcat,

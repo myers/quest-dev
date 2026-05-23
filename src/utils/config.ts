@@ -14,6 +14,7 @@ export interface QuestDevConfig {
   device?: string;
   idleTimeout?: number;
   lowBattery?: number;
+  debuggingPort?: number;
 }
 
 const CONFIG_PATH = join(homedir(), '.config', 'quest-dev', 'config.json');
@@ -44,6 +45,7 @@ export function saveConfig(values: QuestDevConfig): string {
   if (values.device !== undefined) merged.device = values.device;
   if (values.idleTimeout !== undefined) merged.idleTimeout = values.idleTimeout;
   if (values.lowBattery !== undefined) merged.lowBattery = values.lowBattery;
+  if (values.debuggingPort !== undefined) merged.debuggingPort = values.debuggingPort;
 
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
   writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2) + '\n');

@@ -253,7 +253,7 @@ describe('deploy() event sequence', () => {
           onEvent: push,
           adb,
           targetPackage: 'net.monoloco.keyboarddemo',
-          brpPort: 15702,
+          debuggingPort: 15702,
         },
         stayAwake,
         fakeLogcat(),

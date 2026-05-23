@@ -393,10 +393,17 @@ cli.command(
         describe: 'Time in ms to wait before crash check (default: 5000)',
         type: 'number',
         default: 5000,
+      })
+      .option('debugging-port', {
+        describe:
+          'TCP port to scan for orphan apps before install (default 15702 / Bevy BRP; e.g. 8081 React Native Metro). Overrides config.',
+        type: 'number',
       });
   },
   async (argv) => {
     const apkPath = resolve(argv.apk as string);
+    const debuggingPort =
+      (argv.debuggingPort as number | undefined) ?? loadConfig().debuggingPort;
     const info = await ensureDaemon({
       port: argv.port as number | undefined,
       device: argv.device as string | undefined,
@@ -413,7 +420,11 @@ cli.command(
     for await (const event of daemonFetchNdjson<DeployEvent | { ok: false; error: string }>(
       info,
       '/deploy',
-      { apk_path: apkPath, crash_wait_ms: argv.crashWait },
+      {
+        apk_path: apkPath,
+        crash_wait_ms: argv.crashWait,
+        ...(debuggingPort !== undefined ? { debugging_port: debuggingPort } : {}),
+      },
     )) {
       // Validation-error fallback: response was plain JSON, so we got one
       // object that doesn't have a `type` field.
@@ -595,6 +606,11 @@ cli.command(
         describe: 'Exit stay-awake when battery drops to this percentage',
         type: 'number',
       })
+      .option('debugging-port', {
+        describe:
+          'Default TCP port to scan for orphan apps before deploy (Bevy BRP 15702, RN Metro 8081, etc.)',
+        type: 'number',
+      })
       .option('show', {
         describe: 'Show current config and exit',
         type: 'boolean',
@@ -618,9 +634,10 @@ cli.command(
     if (argv.device !== undefined) values.device = argv.device as string;
     if (argv.idleTimeout !== undefined) values.idleTimeout = argv.idleTimeout as number;
     if (argv.lowBattery !== undefined) values.lowBattery = argv.lowBattery as number;
+    if (argv.debuggingPort !== undefined) values.debuggingPort = argv.debuggingPort as number;
 
     if (Object.keys(values).length === 0) {
-      console.error('No config values provided. Use --pin, --port, --device, --idle-timeout, or --low-battery.');
+      console.error('No config values provided. Use --pin, --port, --device, --idle-timeout, --low-battery, or --debugging-port.');
       process.exit(1);
     }
 
