@@ -1,6 +1,6 @@
 {
   "name": "@myerscarpenter/quest-dev",
-  "version": "2.3.0-next.2",
+  "version": "2.3.0",
   "description": "CLI tools for Meta Quest development — stay awake, screenshots, URL opening, logcat, and battery via ADB",
   "type": "module",
   "bin": {
@@ -20,6 +20,7 @@
     "version:minor": "pnpm version minor",
     "version:major": "pnpm version major"
   },
+  "packageManager": "pnpm@11.2.2",
   "keywords": [
     "meta",
     "quest",

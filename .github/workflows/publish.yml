@@ -22,8 +22,6 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: latest
 
       - name: Install npm v11.6.2 (required for OIDC trusted publishing, min v11.5.1)
         run: npm install -g npm@11.6.2
