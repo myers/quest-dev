@@ -8,7 +8,7 @@
 
 import { resolve, join } from 'path';
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, symlinkSync, statSync, readlinkSync, openSync, closeSync } from 'fs';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { checkADBPath, checkADBDevices, adbArgs } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
 
@@ -266,9 +266,17 @@ export async function statusCommand(): Promise<void> {
 }
 
 /**
- * Tail current capture
+ * Tail current capture.
+ *
+ * Pass-through to `tail(1)`. `args` is forwarded verbatim, the latest
+ * capture file is appended as the operand, and `tail`'s exit code is
+ * propagated. So:
+ *   `quest-dev logcat tail`          → `tail <latest>`        (last 10 lines, exits)
+ *   `quest-dev logcat tail -f`       → `tail -f <latest>`     (stream until Ctrl-C)
+ *   `quest-dev logcat tail -n 100`   → `tail -n 100 <latest>`
+ *   `quest-dev logcat tail --help`   → `tail --help`          (tail's own help)
  */
-export async function tailCommand(): Promise<void> {
+export function tailCommand(args: string[] = []): never {
   const latestFile = getLatestLogFile();
 
   if (!latestFile) {
@@ -276,16 +284,24 @@ export async function tailCommand(): Promise<void> {
     process.exit(1);
   }
 
-  console.log(`Tailing: ${latestFile}`);
-  console.log('Press Ctrl+C to stop\n');
+  // Synchronous + stdio:inherit so we block here until tail exits and
+  // its stdio flows straight to ours. After this call returns, callers
+  // (specifically the short-circuit in index.ts) must NOT continue —
+  // otherwise yargs would re-parse argv and trip `.strict()` on flags
+  // like `-f` that were meant for tail. The exit below guarantees that.
+  const result = spawnSync('tail', [...args, latestFile], { stdio: 'inherit' });
 
-  // Use tail -f
-  const tailProc = spawn('tail', ['-f', latestFile], {
-    stdio: 'inherit'
-  });
-
-  tailProc.on('error', (error) => {
-    console.error('Failed to tail log:', error.message);
+  if (result.error) {
+    console.error('Failed to tail log:', result.error.message);
     process.exit(1);
-  });
+  }
+
+  if (result.signal) {
+    // Re-raise to ourselves so the caller's exit reason matches tail's.
+    process.kill(process.pid, result.signal);
+    // Unreachable but appease the type checker.
+    process.exit(128);
+  }
+
+  process.exit(result.status ?? 0);
 }

@@ -132,7 +132,9 @@ Capture Android logcat output for Quest debugging. Quest's ring buffer fills fas
 quest-dev logcat start              # start capturing (clears ring buffer first)
 quest-dev logcat start --filter "Unity:V"  # capture with filter
 quest-dev logcat status             # check if capturing
-quest-dev logcat tail               # tail the current log file
+quest-dev logcat tail               # tail(1) the current log file (defaults to last 10 lines)
+quest-dev logcat tail -f            # stream until Ctrl-C
+quest-dev logcat tail -n 500        # last 500 lines and exit (great for scripts)
 quest-dev logcat stop               # stop capturing, show file info
 ```
 

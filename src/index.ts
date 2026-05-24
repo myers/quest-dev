@@ -61,6 +61,19 @@ function handleDaemonError(err: unknown, retryHint: string): never {
   throw err;
 }
 
+// `quest-dev logcat tail [tail_args...]` is a pure pass-through to
+// `tail(1)` against the currently-captured log file. Short-circuit before
+// yargs sees it so `-f`, `-n N`, `-F`, `--help`, etc. reach tail intact
+// rather than tripping `.strict()`. Anything after `tail` is tail's; no
+// quest-dev semantics in this path.
+{
+  const _argv = hideBin(process.argv);
+  if (_argv[0] === 'logcat' && _argv[1] === 'tail') {
+    tailCommand(_argv.slice(2));
+    // tailCommand never returns; the spawned tail process drives our exit.
+  }
+}
+
 // Create CLI
 const cli = yargs(hideBin(process.argv))
   .scriptName('quest-dev')
@@ -191,16 +204,19 @@ cli.command(
   }
 );
 
-// Logcat command — delegates to daemon for start/stop/status, tail remains standalone
+// Logcat command — delegates to daemon for start/stop/status.
+// `tail` is handled by a pre-yargs short-circuit at the top of this file
+// because it forwards arbitrary `tail(1)` flags that would otherwise
+// trip `.strict()`. Help text below still lists `tail` so users discover it.
 cli.command(
   'logcat <action>',
-  'Capture Android logcat to files (CRITICAL: always start before testing to avoid losing crash logs)',
+  'Capture Android logcat to files (CRITICAL: always start before testing to avoid losing crash logs). For `tail [tail_args...]`, see `quest-dev logcat tail --help`.',
   (yargs) => {
     return yargs
       .positional('action', {
         describe: 'Action to perform',
         type: 'string',
-        choices: ['start', 'stop', 'status', 'tail'],
+        choices: ['start', 'stop', 'status'],
         demandOption: true
       })
       .option('filter', {
@@ -210,11 +226,6 @@ cli.command(
   },
   async (argv) => {
     const action = argv.action as string;
-
-    if (action === 'tail') {
-      await tailCommand();
-      return;
-    }
 
     // Delegate to daemon
     const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined })
