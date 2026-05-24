@@ -1,6 +1,6 @@
 {
   "name": "@myerscarpenter/quest-dev",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "CLI tools for Meta Quest development — stay awake, screenshots, URL opening, logcat, and battery via ADB",
   "type": "module",
   "bin": {
@@ -39,8 +39,8 @@
     "url": "https://github.com/myers/quest-dev"
   },
   "dependencies": {
-    "@myerscarpenter/cast2-protocol": "workspace:*",
     "@fastify/static": "^9.0.0",
+    "@myerscarpenter/cast2-protocol": "workspace:*",
     "fastify": "^5.8.2",
     "htm": "^3.1.1",
     "preact": "^10.29.0",
