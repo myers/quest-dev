@@ -2,7 +2,8 @@
  * `quest-dev device` — manage the alias registry and introspect device ports.
  */
 import { resolveDevice, type ResolvedDevice } from '../daemon/resolve.js';
-import { readRegistry, type DaemonRecord } from '../daemon/registry.js';
+import { type DaemonRecord } from '../daemon/registry.js';
+import { discoverDaemon } from '../daemon/client.js';
 import { loadDevices, saveDevices, setAlias, removeAlias } from '../utils/devices.js';
 import { readSerial, getBatteryInfo, formatBatteryInfo, setAdbDevice, type BatteryInfo } from '../utils/adb.js';
 import { execCommand } from '../utils/exec.js';
@@ -52,7 +53,7 @@ export function deviceRm(alias: string): void {
 export async function deviceList(json: boolean): Promise<void> {
   const map = loadDevices();
   const rows = Object.entries(map).map(([alias, e]) => ({
-    alias, address: e.address, serial: e.serial, daemon: readRegistry(e.serial) ? 'running' : 'stopped',
+    alias, address: e.address, serial: e.serial, daemon: discoverDaemon(e.serial) ? 'running' : 'stopped',
   }));
   if (json) { console.log(JSON.stringify(rows, null, 2)); return; }
   if (rows.length === 0) { console.log('No aliases. Add one with: quest-dev device set <alias> <address>'); return; }
@@ -61,7 +62,7 @@ export async function deviceList(json: boolean): Promise<void> {
 
 export async function deviceInfo(ref: string | undefined, json: boolean): Promise<void> {
   const resolved = await resolveDevice(ref);
-  const record = readRegistry(resolved.serial);
+  const record = discoverDaemon(resolved.serial);
   let battery: BatteryInfo | null = null;
   try {
     setAdbDevice(resolved.address);
