@@ -8,7 +8,7 @@
  * parent is killed (TaskStop, terminal close, claude code exit).
  */
 
-import { checkADBPath, getBatteryInfo, formatBatteryInfo, adbArgs } from '../utils/adb.js';
+import { checkADBPath, getBatteryInfo, formatBatteryInfo, adbArgs, type BatteryInfo } from '../utils/adb.js';
 import { loadPin, loadConfig } from '../utils/config.js';
 import { execCommand } from '../utils/exec.js';
 import { execFileSync, spawn, ChildProcess } from 'child_process';
@@ -25,6 +25,47 @@ import {
 
 // Re-export for tests
 export { type QuestProtections, buildSetPropertyArgs, parseQuestProtections };
+
+/**
+ * Accumulate how long the headset has been unplugged, across battery polls.
+ *
+ * Each poll either adds the elapsed interval (while `not charging`) or resets
+ * the counter to zero (while `charging`/`fast charging`). A brief unplug that
+ * returns to charging before the grace window elapses therefore clears itself,
+ * so a cable bump or PD renegotiation doesn't end the session.
+ *
+ * @param accumulatedMs - unplugged time accumulated so far
+ * @param state - current battery charge state
+ * @param intervalMs - time since the previous poll
+ * @returns the new accumulated unplugged time
+ */
+export function trackUnpluggedDuration(
+  accumulatedMs: number,
+  state: BatteryInfo['state'],
+  intervalMs: number,
+): number {
+  if (state === 'not charging') {
+    return accumulatedMs + intervalMs;
+  }
+  return 0;
+}
+
+/**
+ * Decide whether to exit because the headset has been unplugged too long.
+ *
+ * A threshold of 0 (or negative) disables the feature — the session stays
+ * awake on battery until the separate low-battery level exit fires.
+ *
+ * @param accumulatedUnpluggedMs - unplugged time accumulated so far
+ * @param unpluggedTimeoutMs - grace window; 0/negative disables the check
+ */
+export function shouldExitOnUnplug(
+  accumulatedUnpluggedMs: number,
+  unpluggedTimeoutMs: number,
+): boolean {
+  if (unpluggedTimeoutMs <= 0) return false;
+  return accumulatedUnpluggedMs >= unpluggedTimeoutMs;
+}
 
 /**
  * Wake the Quest screen
@@ -93,6 +134,7 @@ export async function stayAwakeCommand(
   cliIdleTimeout?: number,
   cliLowBattery?: number,
   verbose: boolean = false,
+  cliUnpluggedTimeout?: number,
 ): Promise<void> {
   checkADBPath();
 
@@ -115,6 +157,10 @@ export async function stayAwakeCommand(
   const pin = loadPin(cliPin);
   const idleTimeout = cliIdleTimeout ?? config.idleTimeout ?? 300000;
   const lowBattery = cliLowBattery ?? config.lowBattery ?? 10;
+  // Grace window for a sustained unplug. On by default (5 min) so an unplugged
+  // headset exits before draining; 0 disables it (stay awake on battery until
+  // the low-battery level exit). A brief unplug under this window is forgiven.
+  const unpluggedTimeout = cliUnpluggedTimeout ?? config.unpluggedTimeout ?? 300000;
 
   // PID file management
   const pidFilePath = `${os.homedir()}/.quest-dev-stay-awake.pid`;
@@ -189,7 +235,10 @@ export async function stayAwakeCommand(
     console.warn('Failed to read battery status');
   }
 
-  console.log(`Quest will stay awake (idle timeout: ${Math.round(idleTimeout / 1000)}s, low battery exit: ${lowBattery}%). Press Ctrl-C to restore.`);
+  const unpluggedExitDesc = unpluggedTimeout > 0
+    ? `unplugged exit: ${Math.round(unpluggedTimeout / 1000)}s`
+    : 'unplugged exit: off';
+  console.log(`Quest will stay awake (idle timeout: ${Math.round(idleTimeout / 1000)}s, low battery exit: ${lowBattery}%, ${unpluggedExitDesc}). Press Ctrl-C to restore.`);
 
   // Idle timer
   let idleTimerHandle: NodeJS.Timeout | null = null;
@@ -243,7 +292,10 @@ export async function stayAwakeCommand(
   // Start idle timer
   resetIdleTimer();
 
-  // Battery monitoring loop (every 60s)
+  // Battery monitoring loop
+  const BATTERY_POLL_MS = 60000;
+  let unpluggedMs = 0; // accumulated time spent unplugged across polls
+
   const batteryInterval = setInterval(async () => {
     try {
       const battery = await getBatteryInfo();
@@ -259,11 +311,19 @@ export async function stayAwakeCommand(
       if (battery.level <= lowBattery && battery.state === 'not charging') {
         console.log(`\nBattery critically low (${battery.level}%), exiting to preserve battery...`);
         cleanup();
+        return;
+      }
+
+      // Exit on a sustained unplug (a brief unplug under the grace window is forgiven).
+      unpluggedMs = trackUnpluggedDuration(unpluggedMs, battery.state, BATTERY_POLL_MS);
+      if (shouldExitOnUnplug(unpluggedMs, unpluggedTimeout)) {
+        console.log(`\nUnplugged for ${Math.round(unpluggedMs / 1000)}s, exiting to preserve battery...`);
+        cleanup();
       }
     } catch {
       // Ignore battery check failures (device might be briefly unavailable)
     }
-  }, 60000);
+  }, BATTERY_POLL_MS);
 
   // Keep process alive
   console.log('Keeping Quest awake...');

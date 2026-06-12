@@ -20,8 +20,7 @@
 
 import { resolve, join } from "path";
 import { existsSync, statSync, writeFileSync } from "fs";
-import type { DaemonInfo } from "../daemon/daemon.js";
-import { ensureDaemon, daemonFetch } from "../daemon/client.js";
+import { ensureDaemon, daemonFetch, type DaemonInfo } from "../daemon/client.js";
 import { generateScreenshotFilename } from "../utils/filename.js";
 import { addJpegFileComment } from "../utils/jpeg-comment.js";
 

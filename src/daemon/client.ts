@@ -3,14 +3,24 @@
  * Auto-starts daemon if needed, then calls HTTP endpoints.
  */
 
-import { readFileSync, existsSync, unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { DAEMON_JSON, type DaemonInfo } from "./daemon.js";
+import {
+  readRegistry,
+  removeRegistry,
+  writeRegistry,
+  type DaemonRecord,
+} from "./registry.js";
+import { resolveDevice as resolveDeviceFull } from "./resolve.js";
 import { loadConfig } from "../utils/config.js";
 import { verbose } from "../utils/verbose.js";
 import { getPackageVersion } from "../utils/version.js";
 
-const DEFAULT_PORT = 19872;
+/**
+ * Connection info the rest of the CLI consumes. The per-serial registry record
+ * is a superset of the old DaemonInfo (it carries `pid` + `port`), so we reuse
+ * it directly as the daemon handle.
+ */
+export type DaemonInfo = DaemonRecord;
 
 /** Check if a PID is alive */
 function isPidAlive(pid: number): boolean {
@@ -22,25 +32,16 @@ function isPidAlive(pid: number): boolean {
   }
 }
 
-/** Read daemon.json and verify PID is alive */
-export function discoverDaemon(): DaemonInfo | null {
-  if (!existsSync(DAEMON_JSON)) {
-    return null;
-  }
-  try {
-    const info: DaemonInfo = JSON.parse(readFileSync(DAEMON_JSON, "utf-8"));
-    if (isPidAlive(info.pid)) {
-      return info;
-    }
-    verbose(`Stale daemon.json (PID ${info.pid} is dead), cleaning up`);
-    try {
-      unlinkSync(DAEMON_JSON);
-    } catch {
-      // Best effort
-    }
-  } catch {
-    // Corrupt file
-  }
+/**
+ * Look up a live daemon for the given serial. Returns the record if its PID is
+ * alive, otherwise cleans up the stale record and returns null.
+ */
+export function discoverDaemon(serial: string): DaemonRecord | null {
+  const record = readRegistry(serial);
+  if (!record) return null;
+  if (isPidAlive(record.pid)) return record;
+  verbose(`Stale daemon registry for ${serial} (PID ${record.pid} is dead), cleaning up`);
+  removeRegistry(serial);
   return null;
 }
 
@@ -54,19 +55,48 @@ export function sendDaemonPing(info: DaemonInfo): void {
   process.kill(info.pid, "SIGUSR1");
 }
 
+/**
+ * Resolve the device referenced by `cliDevice` to its serial and return a live
+ * daemon record for it, or null if the device can't be resolved or no live
+ * daemon exists. Never throws — intended for best-effort paths (stop, --off,
+ * config warnings) that must not fail when no device is connected.
+ */
+export async function discoverDaemonForDevice(
+  cliDevice?: string,
+): Promise<DaemonRecord | null> {
+  let serial: string;
+  try {
+    ({ serial } = await resolveDeviceFull(cliDevice));
+  } catch {
+    return null;
+  }
+  return discoverDaemon(serial);
+}
+
 export interface SpawnDaemonOptions {
-  port: number;
-  device?: string;
+  serial: string;
+  address: string;
+  /** Only forwarded when the user explicitly set a port (so default binds :0). */
+  port?: number;
   host?: string;
   idleTimeout?: number;
   lowBattery?: number;
+  unpluggedTimeout?: number;
 }
 
-/** Spawn daemon as a detached background process */
-async function spawnDaemon(opts: SpawnDaemonOptions): Promise<DaemonInfo> {
-  const args = [process.argv[1], "daemon", "--port", String(opts.port)];
-  if (opts.device) {
-    args.push("--device", opts.device);
+/** Spawn daemon as a detached background process, keyed on serial. */
+async function spawnDaemon(opts: SpawnDaemonOptions): Promise<DaemonRecord> {
+  const args = [
+    process.argv[1],
+    "daemon",
+    "--serial",
+    opts.serial,
+    "--address",
+    opts.address,
+  ];
+  // Only pass --port when explicitly requested; otherwise the daemon binds :0.
+  if (opts.port !== undefined) {
+    args.push("--port", String(opts.port));
   }
   if (opts.host) {
     args.push("--host", opts.host);
@@ -77,85 +107,29 @@ async function spawnDaemon(opts: SpawnDaemonOptions): Promise<DaemonInfo> {
   if (opts.lowBattery !== undefined) {
     args.push("--low-battery", String(opts.lowBattery));
   }
+  if (opts.unpluggedTimeout !== undefined) {
+    args.push("--unplugged-timeout", String(opts.unpluggedTimeout));
+  }
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: "ignore",
   });
   child.unref();
 
-  // Wait for daemon.json to appear (up to 5s)
+  // Wait for the registry record to appear (up to 5s).
   for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 100));
-    const info = discoverDaemon();
-    if (info) {
-      return info;
-    }
+    const record = readRegistry(opts.serial);
+    if (record) return record;
   }
 
-  throw new Error("Daemon failed to start (timed out waiting for daemon.json)");
-}
-
-/** Resolve daemon port from CLI flag → config → default */
-export function resolvePort(cliPort?: number): number {
-  if (cliPort) return cliPort;
-  const config = loadConfig();
-  return config.port ?? DEFAULT_PORT;
+  throw new Error(
+    `Daemon failed to start (timed out waiting for registry record for ${opts.serial})`,
+  );
 }
 
 function printDaemonUrl(port: number, host: string = "127.0.0.1"): void {
   console.log(`Daemon: http://${host}:${port} (API: /help)`);
-}
-
-/** Resolve device from CLI flag → config */
-export function resolveDevice(cliDevice?: string): string | undefined {
-  if (cliDevice) return cliDevice;
-  const config = loadConfig();
-  return config.device;
-}
-
-/**
- * Thrown when the running daemon is bound to a different ADB device than
- * the one the caller requested via --device. CLI handlers should catch
- * this, print a helpful message, and exit non-zero.
- */
-export class DaemonDeviceMismatchError extends Error {
-  readonly bound: string;
-  readonly requested: string;
-  constructor(bound: string, requested: string) {
-    super(`daemon is bound to ${bound} but --device requested ${requested}`);
-    this.name = "DaemonDeviceMismatchError";
-    this.bound = bound;
-    this.requested = requested;
-  }
-}
-
-/**
- * Decide whether a discovered daemon is acceptable for the requested
- * device. Returns ok=true to reuse the daemon, or ok=false with a
- * conflict description when the caller should error out.
- *
- * Reuse rules:
- * - both undefined → reuse
- * - daemon set, request undefined → reuse
- * - daemon undefined, request set → reuse (soft case: daemon is on
- *   adb's default device, which may or may not match)
- * - both set, equal → reuse
- * - both set, unequal → conflict
- */
-export function checkDaemonDevice(
-  daemonDevice: string | undefined,
-  requestedDevice: string | undefined,
-):
-  | { ok: true }
-  | { ok: false; bound: string; requested: string } {
-  if (
-    requestedDevice &&
-    daemonDevice &&
-    requestedDevice !== daemonDevice
-  ) {
-    return { ok: false, bound: daemonDevice, requested: requestedDevice };
-  }
-  return { ok: true };
 }
 
 /** Resolve host from CLI flag → config → default */
@@ -171,6 +145,7 @@ export interface EnsureDaemonOptions {
   host?: string;
   idleTimeout?: number;
   lowBattery?: number;
+  unpluggedTimeout?: number;
 }
 
 /** Fetch the running daemon's reported version string, or null if unavailable. */
@@ -185,8 +160,8 @@ async function fetchDaemonVersion(info: DaemonInfo): Promise<string | null> {
   }
 }
 
-/** Ask the daemon to shut down, then wait until daemon.json is gone (PID dead). */
-async function stopDaemonAndWait(info: DaemonInfo): Promise<void> {
+/** Ask the daemon to shut down, then wait until its registry record is gone (PID dead). */
+async function stopDaemonAndWait(info: DaemonRecord): Promise<void> {
   try {
     await fetch(`http://127.0.0.1:${info.port}/shutdown`, { method: "POST" });
   } catch {
@@ -194,30 +169,32 @@ async function stopDaemonAndWait(info: DaemonInfo): Promise<void> {
   }
   for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 100));
-    if (!existsSync(DAEMON_JSON)) return;
+    if (readRegistry(info.serial) === null) return;
     if (!isPidAlive(info.pid)) {
-      try {
-        unlinkSync(DAEMON_JSON);
-      } catch {
-        // Best effort
-      }
+      removeRegistry(info.serial);
       return;
     }
   }
   throw new Error(
-    `Daemon (PID ${info.pid}) did not exit after /shutdown; remove ${DAEMON_JSON} manually if needed`,
+    `Daemon (PID ${info.pid}) did not exit after /shutdown; remove its registry record for ${info.serial} manually if needed`,
   );
 }
 
-/** Ensure daemon is running, starting it if needed. Returns connection info. */
-export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<DaemonInfo> {
+/**
+ * Ensure a daemon is running for the requested device, starting it if needed.
+ * Resolves the device's stable serial first, then looks up (or spawns) the
+ * per-serial daemon. Returns the registry record.
+ */
+export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<DaemonRecord> {
   const cliVersion = getPackageVersion();
-  let existing = discoverDaemon();
+  const { address, serial } = await resolveDeviceFull(opts.device);
+
+  let existing = discoverDaemon(serial);
   if (existing) {
-    const requestedDevice = resolveDevice(opts.device);
-    const check = checkDaemonDevice(existing.device, requestedDevice);
-    if (!check.ok) {
-      throw new DaemonDeviceMismatchError(check.bound, check.requested);
+    // Keep the record current if the device moved to a new transport address.
+    if (existing.address !== address) {
+      existing = { ...existing, address };
+      writeRegistry(existing);
     }
     const daemonVersion = await fetchDaemonVersion(existing);
     if (daemonVersion !== null && daemonVersion !== cliVersion) {
@@ -233,11 +210,18 @@ export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<Daem
     }
   }
 
-  const port = resolvePort(opts.port);
-  const device = resolveDevice(opts.device);
   const host = resolveHost(opts.host);
   console.log("Starting quest-dev daemon...");
-  const info = await spawnDaemon({ port, device, host, idleTimeout: opts.idleTimeout, lowBattery: opts.lowBattery });
+  const info = await spawnDaemon({
+    serial,
+    address,
+    // Only forward an explicit --port; otherwise the daemon binds :0.
+    port: opts.port,
+    host,
+    idleTimeout: opts.idleTimeout,
+    lowBattery: opts.lowBattery,
+    unpluggedTimeout: opts.unpluggedTimeout,
+  });
   printDaemonUrl(info.port, host);
   return info;
 }

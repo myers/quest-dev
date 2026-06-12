@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseQuestProtections, buildSetPropertyArgs } from '../src/commands/stay-awake.js';
+import {
+  parseQuestProtections,
+  buildSetPropertyArgs,
+  trackUnpluggedDuration,
+  shouldExitOnUnplug,
+} from '../src/commands/stay-awake.js';
 
 describe('parseQuestProtections', () => {
   it('parses a Bundle where every protection is off (stay-awake on)', () => {
@@ -68,5 +73,51 @@ describe('buildSetPropertyArgs', () => {
     expect(args).toContain('disable_autosleep:b:false');
     expect(args).toContain('set_proximity_close:b:false');
     expect(args).toContain('PIN:s:1234');
+  });
+});
+
+describe('trackUnpluggedDuration', () => {
+  it('accumulates elapsed time while not charging', () => {
+    expect(trackUnpluggedDuration(0, 'not charging', 60000)).toBe(60000);
+    expect(trackUnpluggedDuration(60000, 'not charging', 60000)).toBe(120000);
+  });
+
+  it('resets to zero when charging', () => {
+    expect(trackUnpluggedDuration(120000, 'charging', 60000)).toBe(0);
+  });
+
+  it('resets to zero when fast charging', () => {
+    expect(trackUnpluggedDuration(120000, 'fast charging', 60000)).toBe(0);
+  });
+
+  it('forgives a brief unplug that returns to charging (counter clears)', () => {
+    // unplug for one poll...
+    let acc = trackUnpluggedDuration(0, 'not charging', 60000);
+    expect(acc).toBe(60000);
+    // ...then plugged back in before the grace window elapses
+    acc = trackUnpluggedDuration(acc, 'charging', 60000);
+    expect(acc).toBe(0);
+  });
+});
+
+describe('shouldExitOnUnplug', () => {
+  it('does not exit while the accumulated unplugged time is below the threshold', () => {
+    expect(shouldExitOnUnplug(60000, 300000)).toBe(false);
+    expect(shouldExitOnUnplug(240000, 300000)).toBe(false);
+  });
+
+  it('exits once accumulated unplugged time reaches the threshold', () => {
+    expect(shouldExitOnUnplug(300000, 300000)).toBe(true);
+    expect(shouldExitOnUnplug(360000, 300000)).toBe(true);
+  });
+
+  it('never exits when the threshold is 0 (feature disabled)', () => {
+    expect(shouldExitOnUnplug(0, 0)).toBe(false);
+    expect(shouldExitOnUnplug(600000, 0)).toBe(false);
+    expect(shouldExitOnUnplug(86400000, 0)).toBe(false);
+  });
+
+  it('treats negative thresholds as disabled', () => {
+    expect(shouldExitOnUnplug(600000, -1)).toBe(false);
   });
 });

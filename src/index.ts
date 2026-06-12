@@ -18,7 +18,7 @@ import { batteryCommand } from './commands/battery.js';
 import { stayAwakeStatus, stayAwakeOff } from './commands/stay-awake.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
-import { ensureDaemon, daemonRequest, discoverDaemon, sendDaemonPing, daemonFetch, daemonFetchNdjson, resolvePort, resolveHost, DaemonDeviceMismatchError } from './daemon/client.js';
+import { ensureDaemon, daemonRequest, discoverDaemonForDevice, sendDaemonPing, daemonFetch, daemonFetchNdjson, resolveHost } from './daemon/client.js';
 import type { DeployEvent, DeployResult } from './daemon/deploy.js';
 import { startDaemon } from './daemon/daemon.js';
 import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
@@ -40,26 +40,6 @@ const packageJson = JSON.parse(
   readFileSync(join(__dirname, '../package.json'), 'utf-8')
 );
 const version = packageJson.version;
-
-/**
- * Catch DaemonDeviceMismatchError thrown by ensureDaemon, print a clear
- * message, and exit. `retryHint` is the user-facing command line they
- * should run after `quest-dev stop`.
- */
-function handleDaemonError(err: unknown, retryHint: string): never {
-  if (err instanceof DaemonDeviceMismatchError) {
-    console.error(
-      `Error: daemon is bound to ${err.bound} but --device requested ${err.requested}.\n` +
-        `\n` +
-        `  Stop the running daemon first:\n` +
-        `    quest-dev stop\n` +
-        `  Then retry:\n` +
-        `    ${retryHint}`,
-    );
-    process.exit(1);
-  }
-  throw err;
-}
 
 // `quest-dev logcat tail [tail_args...]` is a pure pass-through to
 // `tail(1)` against the currently-captured log file. Short-circuit before
@@ -228,8 +208,7 @@ cli.command(
     const action = argv.action as string;
 
     // Delegate to daemon
-    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined })
-      .catch((e) => handleDaemonError(e, `quest-dev logcat --device ${argv.device ?? '<ip>'} ${action}`));
+    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
     switch (action) {
       case 'start': {
         const result = await daemonFetch(info, '/logcat/start', {
@@ -310,8 +289,7 @@ cli.command(
       });
   },
   async (argv) => {
-    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined })
-      .catch((e) => handleDaemonError(e, `quest-dev start --device ${argv.device ?? '<ip>'}`));
+    const info = await ensureDaemon({ port: argv.port as number | undefined, device: argv.device as string | undefined, host: argv.host as string | undefined });
 
     // Enable stay-awake
     const result = await daemonFetch(info, '/stay-awake/enable', {
@@ -350,6 +328,10 @@ cli.command(
         describe: 'Exit when battery drops to this percentage (default: 10, or save with: quest-dev config)',
         type: 'number',
       })
+      .option('unplugged-timeout', {
+        describe: 'Exit after this many ms unplugged (default: 300000 = 5 min; 0 disables). Forgives brief unplugs.',
+        type: 'number',
+      })
       .option('off', {
         describe: 'Turn stay-awake off (restore Quest protections) and exit',
         type: 'boolean',
@@ -369,7 +351,7 @@ cli.command(
     }
     if (argv.off) {
       // Try daemon first, fall back to direct
-      const existing = discoverDaemon();
+      const existing = await discoverDaemonForDevice(argv.device as string | undefined);
       if (existing) {
         await daemonFetch(existing, '/stay-awake/disable', { method: 'POST' });
         console.log('Stay-awake off via daemon');
@@ -386,7 +368,8 @@ cli.command(
       host: argv.host as string | undefined,
       idleTimeout: argv.idleTimeout as number | undefined,
       lowBattery: argv.lowBattery as number | undefined,
-    }).catch((e) => handleDaemonError(e, `quest-dev stay-awake --device ${argv.device ?? '<ip>'}`));
+      unpluggedTimeout: argv.unpluggedTimeout as number | undefined,
+    });
     const result = await daemonFetch(info, '/stay-awake/enable', {
       body: { pin: argv.pin },
     }) as { ok: boolean; error?: string };
@@ -430,7 +413,7 @@ cli.command(
       port: argv.port as number | undefined,
       device: argv.device as string | undefined,
       host: argv.host as string | undefined,
-    }).catch((e) => handleDaemonError(e, `quest-dev deploy --device ${argv.device ?? '<ip>'} ${argv.apk}`));
+    });
 
     console.log(`Deploying: ${apkPath}`);
 
@@ -595,8 +578,8 @@ cli.command(
   'stop',
   'Stop the quest-dev daemon (restores Quest settings)',
   () => {},
-  async () => {
-    const existing = discoverDaemon();
+  async (argv) => {
+    const existing = await discoverDaemonForDevice(argv.device as string | undefined);
     if (!existing) {
       console.log('No daemon running');
       return;
@@ -615,8 +598,8 @@ cli.command(
   'ping',
   "Reset the daemon's idle timer (keeps it alive during a long session)",
   () => {},
-  async () => {
-    const info = discoverDaemon();
+  async (argv) => {
+    const info = await discoverDaemonForDevice(argv.device as string | undefined);
     if (!info) {
       console.error('No quest-dev daemon is running — nothing to ping.');
       process.exitCode = 1;
@@ -643,6 +626,10 @@ cli.command(
       })
       .option('low-battery', {
         describe: 'Exit stay-awake when battery drops to this percentage',
+        type: 'number',
+      })
+      .option('unplugged-timeout', {
+        describe: 'Exit stay-awake after this many ms unplugged (0 disables)',
         type: 'number',
       })
       .option('debugging-port', {
@@ -673,22 +660,17 @@ cli.command(
     if (argv.device !== undefined) values.device = argv.device as string;
     if (argv.idleTimeout !== undefined) values.idleTimeout = argv.idleTimeout as number;
     if (argv.lowBattery !== undefined) values.lowBattery = argv.lowBattery as number;
+    if (argv.unpluggedTimeout !== undefined) values.unpluggedTimeout = argv.unpluggedTimeout as number;
     if (argv.debuggingPort !== undefined) values.debuggingPort = argv.debuggingPort as number;
 
     if (Object.keys(values).length === 0) {
-      console.error('No config values provided. Use --pin, --port, --device, --idle-timeout, --low-battery, or --debugging-port.');
+      console.error('No config values provided. Use --pin, --port, --device, --idle-timeout, --low-battery, --unplugged-timeout, or --debugging-port.');
       process.exit(1);
     }
 
     saveConfig(values);
     console.log('Config saved:');
     console.log(JSON.stringify(values, null, 2));
-
-    // Warn if device changed while daemon is running
-    if (values.device !== undefined && discoverDaemon()) {
-      console.log('\nNote: daemon is running. Restart it to use the new device:');
-      console.log('  quest-dev stop && quest-dev start');
-    }
   }
 );
 
@@ -747,16 +729,22 @@ cli.command(
   false as any, // Hide from help
   (yargs) => {
     return yargs
+      .option('serial', { type: 'string', demandOption: true })
+      .option('address', { type: 'string', demandOption: true })
       .option('idle-timeout', { type: 'number' })
-      .option('low-battery', { type: 'number' });
+      .option('low-battery', { type: 'number' })
+      .option('unplugged-timeout', { type: 'number' });
   },
   async (argv) => {
     await startDaemon({
-      port: resolvePort(argv.port as number | undefined),
-      device: argv.device as string | undefined,
+      serial: argv.serial as string,
+      address: argv.address as string,
+      // Pass --port only when explicitly set; otherwise the daemon binds :0.
+      port: argv.port as number | undefined,
       host: argv.host as string | undefined,
       idleTimeout: argv.idleTimeout as number | undefined,
       lowBattery: argv.lowBattery as number | undefined,
+      unpluggedTimeout: argv.unpluggedTimeout as number | undefined,
     });
   }
 );

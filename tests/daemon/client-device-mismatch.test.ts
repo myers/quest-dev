@@ -1,59 +1,69 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { discoverDaemon } from "../../src/daemon/client.js";
 import {
-  checkDaemonDevice,
-  DaemonDeviceMismatchError,
-} from "../../src/daemon/client.js";
+  writeRegistry,
+  readRegistry,
+  type DaemonRecord,
+} from "../../src/daemon/registry.js";
 
 /**
- * Bug: `quest-dev deploy --device X` silently runs against whatever
- * device the already-running daemon was bound to, ignoring --device.
- * Fix: ensureDaemon delegates the daemon/request device comparison to
- * checkDaemonDevice, then throws DaemonDeviceMismatchError on conflict.
- *
- * The decision matrix from the design doc:
- *
- * | daemon device | requested device | result        |
- * |---------------|------------------|---------------|
- * | undefined     | undefined        | reuse         |
- * | undefined     | set              | reuse (soft)  |
- * | set           | undefined        | reuse         |
- * | set, equal    | set, equal       | reuse         |
- * | set, A        | set, B           | conflict      |
+ * The former single-daemon "device mismatch" guard is obsolete: daemons are now
+ * keyed on the device's hardware serial, so two devices have independent
+ * registry files and can never collide. What still matters is that
+ * `discoverDaemon(serial)`:
+ *   - returns a live record (PID alive), and
+ *   - treats a stale record (PID dead) as absent, cleaning it up.
  */
-describe("checkDaemonDevice", () => {
-  it("conflicts when daemon=A and requested=B", () => {
-    const r = checkDaemonDevice("A", "B");
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.bound).toBe("A");
-      expect(r.requested).toBe("B");
-    }
-  });
 
-  it("reuses when both set and equal", () => {
-    expect(checkDaemonDevice("A", "A")).toEqual({ ok: true });
-  });
+let dir: string;
+let saved: string | undefined;
 
-  it("reuses when daemon set and requested undefined", () => {
-    expect(checkDaemonDevice("A", undefined)).toEqual({ ok: true });
-  });
-
-  it("reuses when daemon undefined and requested set (soft case)", () => {
-    expect(checkDaemonDevice(undefined, "A")).toEqual({ ok: true });
-  });
-
-  it("reuses when both undefined", () => {
-    expect(checkDaemonDevice(undefined, undefined)).toEqual({ ok: true });
-  });
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "qd-client-"));
+  saved = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = dir;
 });
 
-describe("DaemonDeviceMismatchError", () => {
-  it("carries bound + requested and mentions both in its message", () => {
-    const e = new DaemonDeviceMismatchError("A", "B");
-    expect(e.bound).toBe("A");
-    expect(e.requested).toBe("B");
-    expect(e.name).toBe("DaemonDeviceMismatchError");
-    expect(e.message).toContain("A");
-    expect(e.message).toContain("B");
+afterEach(() => {
+  if (saved === undefined) delete process.env.XDG_RUNTIME_DIR;
+  else process.env.XDG_RUNTIME_DIR = saved;
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function record(over: Partial<DaemonRecord>): DaemonRecord {
+  return {
+    pid: process.pid, // this test process is, by definition, alive
+    port: 40001,
+    serial: "SERIAL_X",
+    address: "127.0.0.1:5555",
+    cdpPort: 9230,
+    castPort: 4445,
+    startedAt: "t",
+    ...over,
+  };
+}
+
+describe("discoverDaemon (per-serial)", () => {
+  it("returns the record when its PID is alive", () => {
+    const rec = record({ serial: "SERIAL_LIVE" });
+    writeRegistry(rec);
+    expect(discoverDaemon("SERIAL_LIVE")).toEqual(rec);
+  });
+
+  it("treats a dead-PID record as absent and removes it", () => {
+    // PID 1 is init; process.kill(1, 0) from an unprivileged test throws ESRCH
+    // or EPERM. Use a PID guaranteed not to be this process's signalable target.
+    const deadPid = 2147483646; // implausibly high, not a live process
+    writeRegistry(record({ serial: "SERIAL_STALE", pid: deadPid }));
+    expect(discoverDaemon("SERIAL_STALE")).toBeNull();
+    // stale file was cleaned up
+    expect(readRegistry("SERIAL_STALE")).toBeNull();
+  });
+
+  it("returns null when no record exists for the serial", () => {
+    expect(discoverDaemon("SERIAL_NONE")).toBeNull();
   });
 });

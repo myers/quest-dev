@@ -14,6 +14,7 @@ export interface QuestDevConfig {
   device?: string;
   idleTimeout?: number;
   lowBattery?: number;
+  unpluggedTimeout?: number;
   debuggingPort?: number;
 }
 
@@ -45,6 +46,7 @@ export function saveConfig(values: QuestDevConfig): string {
   if (values.device !== undefined) merged.device = values.device;
   if (values.idleTimeout !== undefined) merged.idleTimeout = values.idleTimeout;
   if (values.lowBattery !== undefined) merged.lowBattery = values.lowBattery;
+  if (values.unpluggedTimeout !== undefined) merged.unpluggedTimeout = values.unpluggedTimeout;
   if (values.debuggingPort !== undefined) merged.debuggingPort = values.debuggingPort;
 
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
