@@ -161,6 +161,9 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<void> {
   const bound = server.server.address();
   const boundPort =
     typeof bound === "object" && bound ? bound.port : port;
+  if (!boundPort) {
+    throw new Error("Daemon failed to determine its bound port");
+  }
 
   // Record this daemon in the per-serial registry.
   const record: DaemonRecord = {

@@ -7,7 +7,6 @@ import { spawn } from "node:child_process";
 import {
   readRegistry,
   removeRegistry,
-  writeRegistry,
   type DaemonRecord,
 } from "./registry.js";
 import { resolveDevice as resolveDeviceFull } from "./resolve.js";
@@ -114,13 +113,28 @@ async function spawnDaemon(opts: SpawnDaemonOptions): Promise<DaemonRecord> {
     detached: true,
     stdio: "ignore",
   });
+
+  // Detect an immediate crash (bad args, bind failure, throw before
+  // writeRegistry). The exit handler fires for an early death even though we
+  // unref() to keep the daemon detached once it survives startup.
+  let earlyExit: number | null = null;
+  child.on("exit", (code) => {
+    earlyExit = code;
+  });
   child.unref();
 
-  // Wait for the registry record to appear (up to 5s).
+  // Wait for the registry record to appear (up to 5s). Only accept a record
+  // whose PID is alive, so a stale predecessor file (DEAD pid) isn't mistaken
+  // for the freshly-spawned daemon.
   for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 100));
+    if (earlyExit !== null) {
+      throw new Error(
+        `Daemon process exited with code ${earlyExit} before registering (check the device is reachable and the port is free)`,
+      );
+    }
     const record = readRegistry(opts.serial);
-    if (record) return record;
+    if (record && isPidAlive(record.pid)) return record;
   }
 
   throw new Error(
@@ -191,11 +205,13 @@ export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<Daem
 
   let existing = discoverDaemon(serial);
   if (existing) {
-    // Keep the record current if the device moved to a new transport address.
-    if (existing.address !== address) {
-      existing = { ...existing, address };
-      writeRegistry(existing);
-    }
+    // If the device moved to a new transport address, do NOT rewrite the
+    // record here. The running daemon owns its record and is bound to the
+    // address it started with (it captured setAdbDevice/CastManager at
+    // startup); advertising a new address the daemon isn't using is
+    // misleading and races with the daemon's own shutdown removeRegistry. A
+    // transport change requires restarting the daemon (handled by a later
+    // task that adds daemon transport re-binding). Reuse `existing` as-is.
     const daemonVersion = await fetchDaemonVersion(existing);
     if (daemonVersion !== null && daemonVersion !== cliVersion) {
       console.log(
