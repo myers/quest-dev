@@ -19,6 +19,7 @@ import { stayAwakeStatus, stayAwakeOff } from './commands/stay-awake.js';
 import { deviceSet, deviceRm, deviceList, deviceInfo } from './commands/device.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
+import { cleanupLegacyArtifacts } from './daemon/migrate.js';
 import { ensureDaemon, daemonRequest, discoverDaemonForDevice, sendDaemonPing, daemonFetch, daemonFetchNdjson, resolveHost } from './daemon/client.js';
 import { resolveDevice } from './daemon/resolve.js';
 import { setAdbDevice } from './utils/adb.js';
@@ -784,11 +785,12 @@ cli.command(
   }
 );
 
-// Set verbose flag before any command runs
+// Set verbose flag and run one-shot legacy cleanup before any command runs
 cli.middleware((argv) => {
   if (argv.verbose) {
     setVerbose(true);
   }
+  cleanupLegacyArtifacts();
 });
 
 // Parse and execute
