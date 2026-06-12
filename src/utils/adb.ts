@@ -6,6 +6,7 @@ import which from 'which';
 import net from 'net';
 import { execCommand, execCommandFull } from './exec.js';
 import { verbose } from './verbose.js';
+import { cdpPortForSerial } from './device-id.js';
 
 const CDP_PORT = 9223; // Chrome DevTools Protocol port (Quest browser default)
 
@@ -238,6 +239,29 @@ export function isPortListening(port: number): Promise<boolean> {
     });
     socket.connect(port, '127.0.0.1');
   });
+}
+
+/** Find the first free port at or above `preferred`, using `isFree` to test
+ * each candidate. Pure control flow; `isFree` is injected for testing. */
+export async function firstFreePort(
+  preferred: number,
+  isFree: (port: number) => Promise<boolean>,
+): Promise<number> {
+  let port = preferred;
+  for (let i = 0; i < 128; i++, port++) {
+    if (await isFree(port)) return port;
+  }
+  throw new Error(`No free port found at or above ${preferred}`);
+}
+
+/** Resolve the actual CDP forward port for a device: start from the device's
+ * deterministic preferred port and probe upward past any in-use port.
+ * `isFree` defaults to "nothing is listening on this port". */
+export async function resolveCdpPort(
+  serial: string,
+  isFree: (port: number) => Promise<boolean> = async (p) => !(await isPortListening(p)),
+): Promise<number> {
+  return firstFreePort(cdpPortForSerial(serial), isFree);
 }
 
 /**
