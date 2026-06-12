@@ -11,15 +11,16 @@ import {
   refreshCDPForwarding,
   isBrowserRunning,
   launchBrowser,
-  getCDPPort
+  getCDPPort,
+  resolveCdpPort
 } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
 
 /**
  * Close all tabs except the one with the target URL
  */
-async function closeOtherTabs(targetUrl: string, browser: string): Promise<void> {
-  const cdpPort = await getCDPPort(browser);
+async function closeOtherTabs(targetUrl: string, browser: string, cdpPortOverride?: number): Promise<void> {
+  const cdpPort = await getCDPPort(browser, cdpPortOverride);
 
   try {
     // Get list of tabs
@@ -67,8 +68,8 @@ async function closeOtherTabs(targetUrl: string, browser: string): Promise<void>
 /**
  * Try to navigate or reload existing tab via cdp-cli
  */
-async function tryNavigateExistingTab(targetUrl: string, browser: string): Promise<boolean> {
-  const cdpPort = await getCDPPort(browser);
+async function tryNavigateExistingTab(targetUrl: string, browser: string, cdpPortOverride?: number): Promise<boolean> {
+  const cdpPort = await getCDPPort(browser, cdpPortOverride);
 
   try {
     // Get list of tabs using cdp-cli
@@ -146,7 +147,8 @@ async function tryNavigateExistingTab(targetUrl: string, browser: string): Promi
 export async function openCommand(
   url: string,
   closeOthers: boolean = false,
-  browser: string = 'com.oculus.browser'
+  browser: string = 'com.oculus.browser',
+  serial?: string
 ): Promise<void> {
   // Parse URL to determine if we need reverse port forwarding
   let parsedUrl: URL;
@@ -177,13 +179,20 @@ export async function openCommand(
   checkADBPath();
   await checkADBDevices();
 
+  // Compute the per-serial CDP forward port so multiple devices don't collide
+  // on the fixed 9223. Falls back to the default port when no serial is known.
+  const cdpPort = serial ? await resolveCdpPort(serial) : undefined;
+  if (cdpPort !== undefined) {
+    console.log(`CDP for ${serial} at localhost:${cdpPort}`);
+  }
+
   // Set up port forwarding
   if (port !== null) {
     // Localhost URL: need reverse forwarding so Quest can reach the dev server
-    await ensurePortForwarding(port, browser);
+    await ensurePortForwarding(port, browser, cdpPort);
   } else {
     // External URL: only need CDP forwarding to control the browser
-    await ensureCDPForwarding(browser);
+    await ensureCDPForwarding(browser, cdpPort);
   }
 
   // Check if browser is running
@@ -196,7 +205,7 @@ export async function openCommand(
     console.log('Browser is already running');
 
     // Try to navigate existing or blank tab via cdp-cli first
-    const navigated = await tryNavigateExistingTab(url, browser);
+    const navigated = await tryNavigateExistingTab(url, browser, cdpPort);
 
     if (!navigated) {
       console.log('No existing or blank tab found, opening URL...');
@@ -211,11 +220,11 @@ export async function openCommand(
   // chrome_devtools_remote socket and create a PID-specific one instead.
   console.log('Waiting for browser to stabilize...');
   await new Promise(resolve => setTimeout(resolve, browserRunning ? 2000 : 3000));
-  await refreshCDPForwarding(browser);
+  await refreshCDPForwarding(browser, cdpPort);
 
   // Close other tabs if requested
   if (closeOthers) {
-    await closeOtherTabs(url, browser);
+    await closeOtherTabs(url, browser, cdpPort);
   }
 
   console.log('\nDone!\n');

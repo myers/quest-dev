@@ -5,9 +5,8 @@
 
 import { resolve, join } from 'path';
 import { existsSync, statSync } from 'fs';
-import { checkADBPath, checkADBDevices, checkUSBFileTransfer, checkQuestAwake, setAdbDevice, adbArgs } from '../utils/adb.js';
+import { checkADBPath, checkADBDevices, checkUSBFileTransfer, checkQuestAwake, adbArgs } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
-import { loadConfig } from '../utils/config.js';
 import { generateScreenshotFilename } from '../utils/filename.js';
 import { addJpegFileComment } from '../utils/jpeg-comment.js';
 
@@ -161,11 +160,8 @@ export async function screenshotCommand(directoryPath: string, caption: string |
   const localFilename = generateScreenshotFilename(new Date(), caption);
   const outputPath = join(resolvedDir, localFilename);
 
-  // Load device config so -s <device> targets the right Quest
-  const config = loadConfig();
-  if (config.device) {
-    setAdbDevice(config.device);
-  }
+  // Device target is resolved and set by the CLI handler (via resolveDevice +
+  // setAdbDevice) before this runs, so all adbArgs(...) calls hit the right Quest.
 
   // Check prerequisites
   checkADBPath();

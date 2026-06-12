@@ -269,12 +269,13 @@ export async function resolveCdpPort(
  */
 export async function ensurePortForwarding(
   port: number,
-  browser: string = 'com.oculus.browser'
+  browser: string = 'com.oculus.browser',
+  cdpPortOverride?: number
 ): Promise<void> {
   try {
     // Detect CDP socket and port for this browser
     const cdpSocket = await detectCDPSocket(browser);
-    const cdpPort = getCDPPortForSocket(cdpSocket);
+    const cdpPort = cdpPortOverride ?? getCDPPortForSocket(cdpSocket);
 
     // Check reverse forwarding (Quest -> Host for dev server)
     const reverseList = await execCommand('adb', adbArgs('reverse', '--list'));
@@ -360,7 +361,11 @@ export async function launchBrowser(url: string, browser: string = 'com.oculus.b
 /**
  * Get CDP port
  */
-export async function getCDPPort(browser: string = 'com.oculus.browser'): Promise<number> {
+export async function getCDPPort(
+  browser: string = 'com.oculus.browser',
+  cdpPortOverride?: number
+): Promise<number> {
+  if (cdpPortOverride !== undefined) return cdpPortOverride;
   const cdpSocket = await detectCDPSocket(browser);
   return getCDPPortForSocket(cdpSocket);
 }
@@ -369,12 +374,13 @@ export async function getCDPPort(browser: string = 'com.oculus.browser'): Promis
  * Set up only CDP forwarding (for external URLs that don't need reverse forwarding)
  */
 export async function ensureCDPForwarding(
-  browser: string = 'com.oculus.browser'
+  browser: string = 'com.oculus.browser',
+  cdpPortOverride?: number
 ): Promise<void> {
   try {
     // Detect CDP socket and port for this browser
     const cdpSocket = await detectCDPSocket(browser);
-    const cdpPort = getCDPPortForSocket(cdpSocket);
+    const cdpPort = cdpPortOverride ?? getCDPPortForSocket(cdpSocket);
 
     // Check forward forwarding (Host -> Quest for CDP)
     const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
@@ -412,11 +418,12 @@ export async function ensureCDPForwarding(
  * (before the browser had a PID), but the browser created a PID-specific socket.
  */
 export async function refreshCDPForwarding(
-  browser: string = 'com.oculus.browser'
+  browser: string = 'com.oculus.browser',
+  cdpPortOverride?: number
 ): Promise<void> {
   try {
     const cdpSocket = await detectCDPSocket(browser);
-    const cdpPort = getCDPPortForSocket(cdpSocket);
+    const cdpPort = cdpPortOverride ?? getCDPPortForSocket(cdpSocket);
 
     // Check if forwarding already points to the correct socket
     const forwardList = await execCommand('adb', adbArgs('forward', '--list'));

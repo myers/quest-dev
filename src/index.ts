@@ -20,6 +20,8 @@ import { deviceSet, deviceRm, deviceList, deviceInfo } from './commands/device.j
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
 import { ensureDaemon, daemonRequest, discoverDaemonForDevice, sendDaemonPing, daemonFetch, daemonFetchNdjson, resolveHost } from './daemon/client.js';
+import { resolveDevice } from './daemon/resolve.js';
+import { setAdbDevice } from './utils/adb.js';
 import type { DeployEvent, DeployResult } from './daemon/deploy.js';
 import { startDaemon } from './daemon/daemon.js';
 import { extractCastingApk, hasCastingApk, findInstalledMqdh } from './utils/casting-apk.js';
@@ -110,6 +112,8 @@ cli.command(
       });
   },
   async (argv) => {
+    const resolved = await resolveDevice(argv.device as string | undefined);
+    setAdbDevice(resolved.address);
     await screenshotCommand(
       argv.directory as string,
       argv.caption as string | undefined
@@ -177,10 +181,13 @@ cli.command(
       });
   },
   async (argv) => {
+    const resolved = await resolveDevice(argv.device as string | undefined);
+    setAdbDevice(resolved.address);
     await openCommand(
       argv.url as string,
       argv.closeOthers as boolean,
-      argv.browser as string
+      argv.browser as string,
+      resolved.serial
     );
   }
 );
@@ -273,7 +280,9 @@ cli.command(
   'battery',
   'Show Quest battery percentage and charging status',
   () => {},
-  async () => {
+  async (argv) => {
+    const resolved = await resolveDevice(argv.device as string | undefined);
+    setAdbDevice(resolved.address);
     await batteryCommand();
   }
 );
