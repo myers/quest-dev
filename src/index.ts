@@ -16,6 +16,7 @@ import { openCommand } from './commands/open.js';
 import { tailCommand } from './commands/logcat.js';
 import { batteryCommand } from './commands/battery.js';
 import { stayAwakeStatus, stayAwakeOff } from './commands/stay-awake.js';
+import { deviceSet, deviceRm, deviceList, deviceInfo } from './commands/device.js';
 import { saveConfig, loadConfig, type QuestDevConfig } from './utils/config.js';
 import { setVerbose } from './utils/verbose.js';
 import { ensureDaemon, daemonRequest, discoverDaemonForDevice, sendDaemonPing, daemonFetch, daemonFetchNdjson, resolveHost } from './daemon/client.js';
@@ -672,6 +673,31 @@ cli.command(
     console.log('Config saved:');
     console.log(JSON.stringify(values, null, 2));
   }
+);
+
+cli.command(
+  'device <action> [arg1] [arg2]',
+  'Manage device aliases and inspect device ports',
+  (yargs) =>
+    yargs
+      .positional('action', { describe: 'set | list | rm | info', type: 'string', choices: ['set', 'list', 'rm', 'info'], demandOption: true })
+      .positional('arg1', { type: 'string' })
+      .positional('arg2', { type: 'string' })
+      .option('json', { type: 'boolean', default: false }),
+  async (argv) => {
+    const action = argv.action as string;
+    if (action === 'set') {
+      if (!argv.arg1 || !argv.arg2) { console.error('Usage: quest-dev device set <alias> <address>'); process.exit(1); }
+      await deviceSet(argv.arg1 as string, argv.arg2 as string);
+    } else if (action === 'rm') {
+      if (!argv.arg1) { console.error('Usage: quest-dev device rm <alias>'); process.exit(1); }
+      deviceRm(argv.arg1 as string);
+    } else if (action === 'list') {
+      await deviceList(argv.json as boolean);
+    } else {
+      await deviceInfo(argv.arg1 as string | undefined, argv.json as boolean);
+    }
+  },
 );
 
 // Setup cast — extract casting APK from MQDH
