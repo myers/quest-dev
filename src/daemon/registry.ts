@@ -11,7 +11,7 @@ export interface DaemonRecord {
   port: number;       // actual OS-assigned HTTP port
   serial: string;     // stable identity (key)
   address: string;    // current transport address
-  cdpPort: number;    // actual forwarded CDP port
+  cdpPort: number;    // preferred CDP port (deterministic per serial); `open` may probe upward if busy
   castPort: number;   // actual cast listen port
   startedAt: string;  // ISO timestamp (stamped by caller)
 }

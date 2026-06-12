@@ -160,6 +160,62 @@ quest-dev battery
 
 - **battery**: Reads battery level and charging state via `adb shell dumpsys battery`.
 
+## Multiple devices
+
+quest-dev supports controlling several Quests from one machine at the same time —
+each command targets a device, and all per-device state (daemon, ports, logs,
+stay-awake) is keyed on the device's stable **hardware serial**, so two agents never
+collide.
+
+### Selecting a device
+
+Pass `--device <ref>` to any command, where `<ref>` is an **alias**, a raw **address**
+(`127.0.0.1:5555`, `quest3.home.arap:5555`), or a **serial**. You can also set
+`QUEST_DEVICE` once in your shell instead of repeating the flag:
+
+```bash
+export QUEST_DEVICE=quest3
+quest-dev stay-awake
+quest-dev open http://localhost:3000/
+```
+
+Resolution order: `--device` → `$QUEST_DEVICE` → saved `config.device` → the single
+connected device (if exactly one). With one device connected, no flag is needed.
+
+### Aliases (for devices that move)
+
+A device's address changes as you move it (SSH tunnel at the office, `*.home.arap` on
+the LAN). Register a stable alias once, update its address whenever it moves, and refer
+to it by name thereafter:
+
+```bash
+quest-dev device set quest3 127.0.0.1:5555     # connects, records the serial
+quest-dev device set quest3 quest3.home.arap:5555   # later, after it moved
+quest-dev device list                          # show aliases (alias, address, serial, daemon state)
+quest-dev device rm quest3
+```
+
+The alias maps to a current address; the underlying hardware serial is what keeps each
+device's daemon, logs, and ports consistent across moves.
+
+### Inspecting a device's ports
+
+```bash
+quest-dev device info quest3            # human-readable
+quest-dev device info quest3 --json     # agent-friendly: serial, address, daemon/CDP/cast ports, stay-awake, battery
+```
+
+Each device gets its own daemon on an OS-assigned HTTP port and a deterministic
+per-serial CDP port — `device info` reports the live values.
+
+### Where state lives (XDG)
+
+- Daemon registry + PID files: `$XDG_RUNTIME_DIR/quest-dev/` (falls back to
+  `~/.local/state/quest-dev/run/` when `XDG_RUNTIME_DIR` is unset, e.g. on macOS).
+- Logcat output: `$XDG_STATE_HOME/quest-dev/logcat/<serial>/` (default
+  `~/.local/state/quest-dev/logcat/<serial>/`).
+- Aliases + config: `$XDG_CONFIG_HOME/quest-dev/` (default `~/.config/quest-dev/`).
+
 ## Development
 
 ```bash
