@@ -12,8 +12,9 @@ import { checkADBPath, getBatteryInfo, formatBatteryInfo, adbArgs, type BatteryI
 import { loadPin, loadConfig } from '../utils/config.js';
 import { execCommand } from '../utils/exec.js';
 import { execFileSync, spawn, ChildProcess } from 'child_process';
-import * as os from 'os';
 import * as fs from 'fs';
+import { join, dirname } from 'path';
+import { runtimeDir, sanitizeSerial } from '../utils/paths.js';
 import {
   type QuestProtections,
   buildSetPropertyArgs,
@@ -97,9 +98,16 @@ export async function stayAwakeOff(cliPin?: string): Promise<void> {
 }
 
 /**
+ * Per-serial PID file path for stay-awake, under the XDG runtime dir.
+ */
+export function stayAwakePidPath(serial: string): string {
+  return join(runtimeDir(), `stay-awake-${sanitizeSerial(serial)}.pid`);
+}
+
+/**
  * Child watchdog process - polls for parent death and cleans up
  */
-export async function stayAwakeWatchdog(parentPid: number, pin: string): Promise<void> {
+export async function stayAwakeWatchdog(parentPid: number, pin: string, serial: string): Promise<void> {
   const pollInterval = 5000;
 
   const checkParent = setInterval(() => {
@@ -113,7 +121,7 @@ export async function stayAwakeWatchdog(parentPid: number, pin: string): Promise
         const args = adbArgs(...buildSetPropertyArgs(pin, true));
         execFileSync('adb', args, { stdio: 'ignore' });
 
-        const pidFile = `${os.homedir()}/.quest-dev-stay-awake.pid`;
+        const pidFile = stayAwakePidPath(serial);
         try { fs.unlinkSync(pidFile); } catch {}
 
         console.log('Stay-awake off — guardian, dialogs, autosleep on');
@@ -135,6 +143,7 @@ export async function stayAwakeCommand(
   cliLowBattery?: number,
   verbose: boolean = false,
   cliUnpluggedTimeout?: number,
+  serial: string = '',
 ): Promise<void> {
   checkADBPath();
 
@@ -163,7 +172,7 @@ export async function stayAwakeCommand(
   const unpluggedTimeout = cliUnpluggedTimeout ?? config.unpluggedTimeout ?? 300000;
 
   // PID file management
-  const pidFilePath = `${os.homedir()}/.quest-dev-stay-awake.pid`;
+  const pidFilePath = stayAwakePidPath(serial);
 
   if (fs.existsSync(pidFilePath)) {
     const existingPid = parseInt(fs.readFileSync(pidFilePath, 'utf-8'));
@@ -183,6 +192,7 @@ export async function stayAwakeCommand(
 
   // Write PID file
   try {
+    fs.mkdirSync(dirname(pidFilePath), { recursive: true });
     fs.writeFileSync(pidFilePath, process.pid.toString());
   } catch (error) {
     console.warn('Failed to write PID file');
@@ -196,6 +206,7 @@ export async function stayAwakeCommand(
       'stay-awake-watchdog',
       '--parent-pid', process.pid.toString(),
       '--pin', pin,
+      '--serial', serial,
     ], {
       detached: true,
       stdio: 'ignore',

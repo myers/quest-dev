@@ -45,7 +45,7 @@ export async function startDaemon(opts: StartDaemonOptions): Promise<void> {
   const cdpPort = cdpPortForSerial(serial);
 
   const stayAwake = new StayAwakeManager();
-  const logcat = new LogcatManager();
+  const logcat = new LogcatManager(serial);
   const castManager = new CastManager(address);
 
   // Idle timer. When the daemon goes `idleTimeout` ms with no activity it

@@ -16,13 +16,11 @@ import {
   symlinkSync,
   readdirSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
 import { adbArgs } from "../utils/adb.js";
-
-const LOG_DIR = resolve(process.env.LOG_DIR || "logs/logcat");
-const LOGFILE_LINK = join(LOG_DIR, "latest.txt");
+import { stateDir, sanitizeSerial } from "../utils/paths.js";
 
 export interface LogcatStatus {
   capturing: boolean;
@@ -34,6 +32,15 @@ export interface LogcatStatus {
 export class LogcatManager {
   private proc: ChildProcess | null = null;
   private currentFile: string | null = null;
+  private readonly serial: string;
+  private readonly logDir: string;
+  private readonly logfileLink: string;
+
+  constructor(serial: string) {
+    this.serial = serial;
+    this.logDir = join(stateDir(), "logcat", sanitizeSerial(serial));
+    this.logfileLink = join(this.logDir, "latest.txt");
+  }
 
   /** Whether logcat is currently capturing */
   get isCapturing(): boolean {
@@ -48,8 +55,8 @@ export class LogcatManager {
     }
 
     // Ensure log directory
-    if (!existsSync(LOG_DIR)) {
-      mkdirSync(LOG_DIR, { recursive: true });
+    if (!existsSync(this.logDir)) {
+      mkdirSync(this.logDir, { recursive: true });
     }
 
     // Generate filename
@@ -59,7 +66,7 @@ export class LogcatManager {
       .replace(/\..+/, "")
       .replace("T", "_")
       .slice(0, 15);
-    const logFile = join(LOG_DIR, `logcat_${timestamp}.txt`);
+    const logFile = join(this.logDir, `logcat_${timestamp}.txt`);
     this.currentFile = logFile;
 
     // Clear ring buffer (with timeout — adb logcat -c can hang on flaky connections)
@@ -88,10 +95,10 @@ export class LogcatManager {
 
     // Update symlink
     try {
-      if (existsSync(LOGFILE_LINK)) {
-        unlinkSync(LOGFILE_LINK);
+      if (existsSync(this.logfileLink)) {
+        unlinkSync(this.logfileLink);
       }
-      symlinkSync(`logcat_${timestamp}.txt`, LOGFILE_LINK);
+      symlinkSync(`logcat_${timestamp}.txt`, this.logfileLink);
     } catch {
       // Non-fatal
     }
