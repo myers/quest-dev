@@ -462,6 +462,18 @@ export interface BatteryInfo {
   state: 'fast charging' | 'charging' | 'not charging';
 }
 
+/** Read the device's stable hardware serial (ro.serialno) for the given
+ * transport address. Returns the trimmed serial, or throws on failure. */
+export async function readSerial(address: string): Promise<string> {
+  const result = await execCommandFull('adb', ['-s', address, 'shell', 'getprop', 'ro.serialno']);
+  if (result.code !== 0) {
+    throw new Error(`Failed to read serial for ${address}`);
+  }
+  const serial = result.stdout.trim();
+  if (!serial) throw new Error(`Empty serial for ${address}`);
+  return serial;
+}
+
 /**
  * Get Quest battery info as structured data
  */
