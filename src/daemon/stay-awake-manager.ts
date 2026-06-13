@@ -40,7 +40,7 @@ export class StayAwakeManager {
     } catch {
       // Non-fatal
     }
-    console.log("Stay-awake on — guardian, dialogs, autosleep off");
+    console.log("Stay-awake on — guardian, dialogs, autosleep, proximity off");
   }
 
   /** Turn stay-awake off (restore Quest protections) */
@@ -51,7 +51,7 @@ export class StayAwakeManager {
     }
     try {
       await setQuestProtections(this.pin, true);
-      console.log("Stay-awake off — guardian, dialogs, autosleep on");
+      console.log("Stay-awake off — guardian, dialogs, autosleep, proximity on");
     } catch (error) {
       console.error("Failed to turn stay-awake off:", (error as Error).message);
     }

@@ -124,7 +124,7 @@ export async function stayAwakeWatchdog(parentPid: number, pin: string, serial: 
         const pidFile = stayAwakePidPath(serial);
         try { fs.unlinkSync(pidFile); } catch {}
 
-        console.log('Stay-awake off — guardian, dialogs, autosleep on');
+        console.log('Stay-awake off — guardian, dialogs, autosleep, proximity on');
       } catch (err) {
         console.error('Failed to restore settings:', (err as Error).message);
       }
@@ -219,7 +219,7 @@ export async function stayAwakeCommand(
   // Turn stay-awake on (turn Quest protections off)
   try {
     await setQuestProtections(pin, false);
-    console.log('Stay-awake on — guardian, dialogs, autosleep off');
+    console.log('Stay-awake on — guardian, dialogs, autosleep, proximity off');
   } catch (error) {
     console.error('Failed to turn stay-awake on:', (error as Error).message);
     console.error('Requires Quest OS v44+ and a valid Meta Store PIN.');
