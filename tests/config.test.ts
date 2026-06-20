@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import { loadConfig, loadPin, tryLoadPin } from '../src/utils/config.js';
+import { loadConfig, loadPin, tryLoadPin, configPath } from '../src/utils/config.js';
 
 vi.mock('fs');
 
@@ -8,6 +8,30 @@ const mockReadFileSync = vi.mocked(fs.readFileSync);
 
 beforeEach(() => {
   vi.resetAllMocks();
+});
+
+describe('configPath (XDG-aware)', () => {
+  let savedXdg: string | undefined;
+  let savedHome: string | undefined;
+  beforeEach(() => {
+    savedXdg = process.env.XDG_CONFIG_HOME;
+    savedHome = process.env.HOME;
+    process.env.HOME = '/home/tester';
+  });
+  afterEach(() => {
+    if (savedXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = savedXdg;
+    if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+  });
+
+  it('honors XDG_CONFIG_HOME', () => {
+    process.env.XDG_CONFIG_HOME = '/custom/cfg';
+    expect(configPath()).toBe('/custom/cfg/quest-dev/config.json');
+  });
+
+  it('falls back to ~/.config when XDG_CONFIG_HOME is unset', () => {
+    delete process.env.XDG_CONFIG_HOME;
+    expect(configPath()).toBe('/home/tester/.config/quest-dev/config.json');
+  });
 });
 
 describe('loadConfig', () => {

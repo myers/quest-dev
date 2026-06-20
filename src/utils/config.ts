@@ -5,7 +5,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { homedir } from 'os';
+import { configDir } from './paths.js';
 
 export interface QuestDevConfig {
   pin?: string;
@@ -18,14 +18,21 @@ export interface QuestDevConfig {
   debuggingPort?: number;
 }
 
-const CONFIG_PATH = join(homedir(), '.config', 'quest-dev', 'config.json');
+/**
+ * Path to config.json, honoring XDG_CONFIG_HOME (via configDir) with a
+ * ~/.config fallback. A function, not a const, so the env var is read at
+ * call time — keeping config.json and devices.json in the same XDG root.
+ */
+export function configPath(): string {
+  return join(configDir(), 'config.json');
+}
 
 /**
- * Load config from ~/.config/quest-dev/config.json
+ * Load config from configDir()/config.json (XDG-aware).
  */
 export function loadConfig(): QuestDevConfig {
   try {
-    const content = readFileSync(CONFIG_PATH, 'utf-8');
+    const content = readFileSync(configPath(), 'utf-8');
     return JSON.parse(content);
   } catch {
     return {};
@@ -49,9 +56,10 @@ export function saveConfig(values: QuestDevConfig): string {
   if (values.unpluggedTimeout !== undefined) merged.unpluggedTimeout = values.unpluggedTimeout;
   if (values.debuggingPort !== undefined) merged.debuggingPort = values.debuggingPort;
 
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2) + '\n');
-  return CONFIG_PATH;
+  const path = configPath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(merged, null, 2) + '\n');
+  return path;
 }
 
 /**

@@ -19,12 +19,18 @@ export function selectRef(
 ): string {
   if (cliDevice) return cliDevice;
   if (envDevice) return envDevice;
+  // Multi-device guard: when several devices are connected, never silently
+  // fall back to a saved config.device — require an explicit choice so a
+  // bare command can't quietly target one of several headsets.
+  if (connected.length >= 2) {
+    throw new Error(
+      `No device specified and multiple connected (${connected.join(', ')}). Use --device <alias|address>.`,
+    );
+  }
   if (configDevice) return configDevice;
   if (connected.length === 1) return connected[0];
   throw new Error(
-    connected.length === 0
-      ? 'No device specified and none connected. Use --device <alias|address>.'
-      : `No device specified and multiple connected (${connected.join(', ')}). Use --device <alias|address>.`,
+    'No device specified and none connected. Use --device <alias|address>.',
   );
 }
 
