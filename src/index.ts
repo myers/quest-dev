@@ -87,8 +87,16 @@ const cli = yargs(hideBin(process.argv))
     global: true,
   })
   .fail((msg, err, yargs) => {
-    yargs.showHelp();
-    if (err) console.error(err.message);
+    // Usage/validation errors (yargs passes `msg`, no `err`) get the help dump
+    // so the user can see valid options. Runtime errors thrown from a command
+    // handler (e.g. device resolution: "multiple connected") pass an `err`
+    // object — the command itself was valid, so print just the message.
+    if (err) {
+      console.error(err.message);
+    } else {
+      yargs.showHelp();
+      if (msg) console.error(msg);
+    }
     process.exit(1);
   })
   .help()
