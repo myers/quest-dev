@@ -123,7 +123,7 @@ export function checkADBPath(): string {
 const TCP_DEVICE_REGEX = /^\d+\.\d+\.\d+\.\d+(:\d+)?$/;
 
 /** Returns true if `target` is a TCP-style adb target. */
-function isTcpTarget(target: string): boolean {
+export function isTcpTarget(target: string): boolean {
   return TCP_DEVICE_REGEX.test(target);
 }
 

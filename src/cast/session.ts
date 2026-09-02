@@ -54,6 +54,7 @@ import {
 } from "@myerscarpenter/cast2-protocol";
 import { execCommand } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
+import { isTcpTarget } from "../utils/adb.js";
 
 export interface CastSessionOptions {
   listenPort?: number;
@@ -178,11 +179,11 @@ export class CastSession extends EventEmitter {
     });
   }
 
-  async start(questIp?: string): Promise<void> {
+  async start(adbDevice?: string): Promise<void> {
     this._running = true;
     this.startTime = Date.now();
 
-    await this.waitForConnections(questIp);
+    await this.waitForConnections(adbDevice);
   }
 
   async stop(): Promise<void> {
@@ -242,11 +243,14 @@ export class CastSession extends EventEmitter {
 
   // --- ADB Setup ---
 
-  async adbSetup(questIp: string): Promise<void> {
-    verbose("Setting up ADB for Quest at", questIp);
-    const device = `${questIp}:5555`;
+  async adbSetup(device: string): Promise<void> {
+    verbose("Setting up ADB for Quest at", device);
 
-    await execCommand("adb", ["connect", device]);
+    // `adb connect` is only meaningful for a TCP target; a USB serial is
+    // already attached, and connecting to it fails with "device not found".
+    if (isTcpTarget(device)) {
+      await execCommand("adb", ["connect", device]);
+    }
     await execCommand("adb", [
       "-s", device, "shell",
       "setprop debug.oculus.command_line_media_capture true",
@@ -271,8 +275,7 @@ export class CastSession extends EventEmitter {
     }
   }
 
-  async startCastService(questIp: string): Promise<void> {
-    const device = `${questIp}:5555`;
+  async startCastService(device: string): Promise<void> {
     verbose("Starting cast service on Quest...");
     await execCommand("adb", [
       "-s", device, "shell",
@@ -287,7 +290,7 @@ export class CastSession extends EventEmitter {
 
   // --- TCP ---
 
-  private waitForConnections(questIp?: string): Promise<void> {
+  private waitForConnections(adbDevice?: string): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.server) {
         reject(new Error("TCP server not bound — call bind() first"));
@@ -317,8 +320,8 @@ export class CastSession extends EventEmitter {
       });
 
       // Trigger the cast service now that we're listening
-      if (questIp) {
-        this.startCastService(questIp).catch((err) => {
+      if (adbDevice) {
+        this.startCastService(adbDevice).catch((err) => {
           if (!resolved) {
             resolved = true;
             reject(err);

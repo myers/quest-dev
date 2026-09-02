@@ -139,8 +139,8 @@ export class CastManager extends EventEmitter {
           `Port ${listenPort} in use, listening on ${session.listenPort}`,
         );
       }
-      await session.adbSetup(questIp);
-      await session.start(questIp);
+      await session.adbSetup(adbDevice);
+      await session.start(adbDevice);
 
       // Stats interval created AFTER all async ops succeed
       this.statsInterval = setInterval(() => {
