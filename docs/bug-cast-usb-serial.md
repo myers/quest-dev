@@ -85,3 +85,56 @@ The first `cast-screenshot` after a cold start can return
 `HTTP 503 {"error":"no frame available"}` — casting has begun but no frame has
 arrived yet. Retrying a few seconds later succeeds. Worth a short internal
 retry/wait rather than surfacing the 503.
+
+---
+
+## Follow-up: cold-start cast delivers zero frames (NOT fixed)
+
+**Status:** open, reproducible, workaround known.
+**quest-dev version:** 2.5.0 + the USB-serial fix above.
+**Date observed:** 2026-09-03, Quest 3 over USB.
+
+Separate from the `:5555` bug. With the serial fix in place, `adb` resolves and
+the cast session reports `connected: true` — but the first `/cast/start` after a
+daemon starts delivers **no frames at all**:
+
+```
+{"connected":true,"running":true,"frame_count":0,"fps":0,"has_frame":false}
+```
+
+`cast-screenshot` therefore exits with `HTTP 503 {"error":"no frame available"}`.
+
+### Reliable workaround
+
+A stop/start cycle against the **same** daemon always recovers it, and frames
+flow immediately afterwards:
+
+```bash
+PORT=$(quest-dev device info <serial> --json | grep -oP '"daemonPort":\s*\K[0-9]+')
+curl -X POST http://127.0.0.1:$PORT/cast/stop
+sleep 3
+curl -X POST http://127.0.0.1:$PORT/cast/start
+# → connected:true, frame_count climbing, ~21 fps
+```
+
+### What did NOT work
+
+Three attempted fixes were tried and reverted, each verified against the repro:
+
+1. **Polling to a deadline** instead of the fixed `setTimeout(1500)` /
+   `setTimeout(500)` in `cast-screenshot.ts`. Correct in principle, but it only
+   converts a fast confusing 503 into a slow one — frames never arrive within
+   any timeout, so this is not the bug.
+2. **`POST /cast/restart`** as a self-heal. Reuses the session and leaves it just
+   as frameless; not equivalent to stop+start.
+3. **`am force-stop com.oculus.magicislandcastingservice`** before
+   `am start-foreground-service` in `CastSession.startCastService()`. Made it
+   worse: the session then reports `connected: false` and never reconnects,
+   consistent with Android's stopped-package broadcast semantics — the
+   `...CONNECT` broadcast is not delivered to a force-stopped app.
+
+Most puzzling part, and where the next investigation should start: issuing
+`/cast/stop` + `/cast/start` **from inside `castScreenshotCommand` via
+`daemonFetch`** does not recover the session, while the byte-identical `curl`
+calls against the same endpoints on the same daemon do. That asymmetry is not
+explained yet, and is the thread to pull.
