@@ -484,9 +484,6 @@ cli.command(
           break;
         case 'stay_awake':
           switch (event.status) {
-            case 'already_enabled':
-              console.log('Stay-awake: already enabled');
-              break;
             case 'enabling':
               console.log('Stay-awake: enabling...');
               break;

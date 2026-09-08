@@ -69,7 +69,7 @@ export type DeployEvent =
   | { type: 'adb_health'; status: 'connecting' | 'reconnecting' | 'restarting_server' }
   | { type: 'adb_health'; status: 'recovered'; via: 'connect' | 'reconnect' | 'kill-server' }
   | { type: 'adb_health'; status: 'failed'; error: string }
-  | { type: 'stay_awake'; status: 'already_enabled' | 'enabling' | 'enabled' | 'failed'; error?: string }
+  | { type: 'stay_awake'; status: 'enabling' | 'enabled' | 'failed'; error?: string }
   | { type: 'started'; package: string; apkSizeMB: number; incremental: boolean }
   | {
       type: 'port_conflict_resolved';
@@ -252,25 +252,25 @@ export async function deploy(
 
   // Keep Quest awake FIRST — before anything else touches ADB.
   // Large APK uploads over Wi-Fi ADB fail if the Quest sleeps mid-transfer.
-  if (stayAwake.isEnabled) {
-    onEvent({ type: 'stay_awake', status: 'already_enabled' });
-  } else {
-    onEvent({ type: 'stay_awake', status: 'enabling' });
-    try {
-      await stayAwake.turnOn(pin);
-      onEvent({ type: 'stay_awake', status: 'enabled' });
-    } catch (error) {
-      const message = (error as Error).message;
-      onEvent({ type: 'stay_awake', status: 'failed', error: message });
-      onEvent({
-        type: 'done',
-        ok: false,
-        package: '',
-        crashed: false,
-        error: `Stay-awake failed: ${message}`,
-      });
-      return;
-    }
+  //
+  // Unconditional: turnOn() is idempotent and verifies with GET_PROPERTY.
+  // Skipping it when the daemon *believed* stay-awake was already on is what
+  // let deploy exit 0 over a headset whose protections were still up.
+  onEvent({ type: 'stay_awake', status: 'enabling' });
+  try {
+    await stayAwake.turnOn(pin);
+    onEvent({ type: 'stay_awake', status: 'enabled' });
+  } catch (error) {
+    const message = (error as Error).message;
+    onEvent({ type: 'stay_awake', status: 'failed', error: message });
+    onEvent({
+      type: 'done',
+      ok: false,
+      package: '',
+      crashed: false,
+      error: `Stay-awake failed: ${message}`,
+    });
+    return;
   }
 
   // Validate APK exists

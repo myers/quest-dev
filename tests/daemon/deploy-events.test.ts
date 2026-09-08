@@ -55,7 +55,6 @@ describe('DeployEvent type', () => {
       { type: 'adb_health', status: 'restarting_server' },
       { type: 'adb_health', status: 'recovered', via: 'reconnect' },
       { type: 'adb_health', status: 'failed', error: 'oops' },
-      { type: 'stay_awake', status: 'already_enabled' },
       { type: 'stay_awake', status: 'enabling' },
       { type: 'stay_awake', status: 'enabled' },
       { type: 'stay_awake', status: 'failed', error: 'oops' },
@@ -66,7 +65,7 @@ describe('DeployEvent type', () => {
       { type: 'crash_check', waitMs: 5000 },
       { type: 'done', ok: true, package: 'com.example', crashed: false, logcatFile: '/tmp/x' },
     ];
-    expect(events).toHaveLength(14);
+    expect(events).toHaveLength(13);
   });
 
 });
@@ -86,9 +85,12 @@ describe('deploy() event sequence', () => {
     vi.spyOn(adbModuleNs, 'ensureAdbHealthy').mockResolvedValue({ kind: 'healthy' });
   });
 
-  it('emits already_enabled when stay-awake is already on', async () => {
+  it('re-applies stay-awake even when the daemon believes it is already on', async () => {
+    // Regression: the daemon's in-memory flag goes stale whenever anything
+    // else touches com.oculus.rc, and deploy used to skip turnOn() on it —
+    // printing "Stay-awake: already enabled" over an unprotected headset.
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn().mockResolvedValue(undefined) } as any;
 
     await deploy(
       { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
@@ -96,8 +98,10 @@ describe('deploy() event sequence', () => {
       fakeLogcat(),
     );
 
-    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'already_enabled' });
-    expect(stayAwake.turnOn).not.toHaveBeenCalled();
+    expect(stayAwake.turnOn).toHaveBeenCalledWith('1234');
+    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'enabling' });
+    expect(events[1]).toMatchObject({ type: 'stay_awake', status: 'enabled' });
+    expect(events.find((e) => (e as any).status === 'already_enabled')).toBeUndefined();
     // Last event is still the existing APK-missing failure.
     expect(events.at(-1)).toMatchObject({ type: 'done', ok: false, error: expect.stringContaining('APK not found') });
   });
@@ -145,7 +149,7 @@ describe('deploy() event sequence', () => {
 
   it('emits a done event for an APK that does not exist', async () => {
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn().mockResolvedValue(undefined) } as any;
 
     await deploy(
       { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
@@ -171,7 +175,7 @@ describe('deploy() event sequence', () => {
       });
 
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn().mockResolvedValue(undefined) } as any;
 
     await deploy(
       { apkPath: '/some/path.apk', pin: '1234', onEvent: push },
@@ -200,7 +204,7 @@ describe('deploy() event sequence', () => {
       .mockResolvedValue({ kind: 'healthy' });
 
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn().mockResolvedValue(undefined) } as any;
 
     await deploy(
       { apkPath: '/definitely/does/not/exist.apk', pin: '1234', onEvent: push },
@@ -209,14 +213,14 @@ describe('deploy() event sequence', () => {
     );
 
     expect(events.find((e) => e.type === 'adb_health')).toBeUndefined();
-    // First event should be the existing already_enabled stay-awake event.
-    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'already_enabled' });
+    // First event is the stay-awake apply, which deploy always performs.
+    expect(events[0]).toMatchObject({ type: 'stay_awake', status: 'enabling' });
     spy.mockRestore();
   });
 
   it('emits a port_conflict_resolved event before install when an orphan app holds the BRP port', async () => {
     const { events, push } = collectDeployEvents();
-    const stayAwake = { isEnabled: true, turnOn: vi.fn() } as any;
+    const stayAwake = { isEnabled: true, turnOn: vi.fn().mockResolvedValue(undefined) } as any;
 
     // Write a real (non-APK) file so deploy() passes its existsSync check.
     // We provide `targetPackage` to bypass APK package-name extraction,

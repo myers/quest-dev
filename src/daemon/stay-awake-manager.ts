@@ -25,14 +25,28 @@ export class StayAwakeManager {
     return this.active;
   }
 
-  /** Turn stay-awake on (turn Quest protections off) */
+  /**
+   * Turn stay-awake on (turn Quest protections off).
+   *
+   * Always talks to the device and always reads GET_PROPERTY back. The
+   * in-memory `active` flag is a cache of device state and goes stale
+   * whenever anything else touches com.oculus.rc (another tool, a reboot,
+   * the VR shell); trusting it is how `deploy` came to print
+   * "Stay-awake: already enabled" over a headset with three of the four
+   * properties off. Throws if the properties did not take.
+   */
   async turnOn(pin: string): Promise<void> {
-    if (this.active) {
-      verbose("stay-awake already on");
-      return;
-    }
     this.pin = pin;
     await setQuestProtections(pin, false);
+    const props = await getQuestProtections();
+    const stillOn = (Object.keys(props) as (keyof QuestProtections)[]).filter((k) => props[k]);
+    if (stillOn.length > 0) {
+      this.active = false;
+      throw new Error(
+        `SET_PROPERTY reported success but GET_PROPERTY still reads these protections on: ` +
+        `${stillOn.join(", ")}. Wrong PIN, or the com.oculus.rc provider rejected the call.`,
+      );
+    }
     this.active = true;
     // Wake screen
     try {
