@@ -12,7 +12,7 @@ import {
 import { resolveDevice as resolveDeviceFull } from "./resolve.js";
 import { loadConfig } from "../utils/config.js";
 import { verbose } from "../utils/verbose.js";
-import { getPackageVersion } from "../utils/version.js";
+import { getBuildId } from "../utils/version.js";
 
 /**
  * Connection info the rest of the CLI consumes. The per-serial registry record
@@ -162,13 +162,23 @@ export interface EnsureDaemonOptions {
   unpluggedTimeout?: number;
 }
 
-/** Fetch the running daemon's reported version string, or null if unavailable. */
-async function fetchDaemonVersion(info: DaemonInfo): Promise<string | null> {
+/**
+ * Build id a /status body identifies itself by: its `build` stamp, else its
+ * bare `version` (a daemon started before build stamps existed — which, being
+ * older code than any CLI that asks, is stale by definition).
+ */
+export function daemonBuildId(body: { version?: unknown; build?: unknown }): string | null {
+  if (typeof body.build === "string") return body.build;
+  if (typeof body.version === "string") return body.version;
+  return null;
+}
+
+/** Fetch the running daemon's build id, or null if unavailable. */
+async function fetchDaemonBuild(info: DaemonInfo): Promise<string | null> {
   try {
     const r = await fetch(`http://127.0.0.1:${info.port}/status`);
     if (!r.ok) return null;
-    const body = (await r.json()) as { version?: unknown };
-    return typeof body.version === "string" ? body.version : null;
+    return daemonBuildId((await r.json()) as { version?: unknown; build?: unknown });
   } catch {
     return null;
   }
@@ -200,7 +210,7 @@ async function stopDaemonAndWait(info: DaemonRecord): Promise<void> {
  * per-serial daemon. Returns the registry record.
  */
 export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<DaemonRecord> {
-  const cliVersion = getPackageVersion();
+  const cliBuild = getBuildId();
   const { address, serial } = await resolveDeviceFull(opts.device);
 
   let existing = discoverDaemon(serial);
@@ -212,10 +222,10 @@ export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<Daem
     // misleading and races with the daemon's own shutdown removeRegistry. A
     // transport change requires restarting the daemon (handled by a later
     // task that adds daemon transport re-binding). Reuse `existing` as-is.
-    const daemonVersion = await fetchDaemonVersion(existing);
-    if (daemonVersion !== null && daemonVersion !== cliVersion) {
+    const daemonBuild = await fetchDaemonBuild(existing);
+    if (daemonBuild !== null && daemonBuild !== cliBuild) {
       console.log(
-        `Daemon is v${daemonVersion} but CLI is v${cliVersion}, restarting daemon...`,
+        `Daemon is build ${daemonBuild} but CLI is build ${cliBuild}, restarting daemon...`,
       );
       await stopDaemonAndWait(existing);
       existing = null;

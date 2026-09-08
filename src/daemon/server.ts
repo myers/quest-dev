@@ -16,7 +16,7 @@ import type { StayAwakeManager } from "./stay-awake-manager.js";
 import type { LogcatManager } from "./logcat-manager.js";
 import type { CastManager } from "./cast-manager.js";
 import { deploy, type DeployEvent } from "./deploy.js";
-import { getPackageVersion } from "../utils/version.js";
+import { getBuildId, getPackageVersion } from "../utils/version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -109,6 +109,9 @@ POST endpoints (JSON body)
 
     return {
       version: getPackageVersion(),
+      // Build identity, so the CLI can spot a daemon still serving pre-rebuild
+      // code at the same semver (see getBuildId).
+      build: getBuildId(),
       uptime: Math.round(process.uptime()),
       pid: process.pid,
       // Cached daemon flag, no adb round-trip. Can be stale — /stay-awake/status
