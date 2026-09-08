@@ -1,22 +1,41 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { sendDaemonPing } from '../../src/daemon/client.js';
 
 describe('sendDaemonPing', () => {
-  it('delivers SIGUSR1 to the daemon process', async () => {
-    // Stand-in daemon: exits 42 on SIGUSR1, exits 1 if it times out first.
-    const child = spawn('node', [
-      '-e',
-      'process.on("SIGUSR1", () => process.exit(42)); setTimeout(() => process.exit(1), 5000);',
+  // 15 s test deadline against the child's 2 s self-destruct: the two can no
+  // longer race, so a signal that never lands fails as `expected 1 to be 42`
+  // rather than as an opaque vitest timeout with no diagnostic.
+  it('delivers SIGUSR1 to the daemon process', { timeout: 15000 }, async () => {
+    // Stand-in daemon, ordered like the real one (src/daemon/daemon.ts: the
+    // SIGUSR1 handler is installed before writeRegistry, so a daemon a client
+    // can discover is always a daemon it can signal). Announcing readiness on
+    // stdout stands in for writeRegistry. Exits 42 on SIGUSR1, 1 on timeout.
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        'process.on("SIGUSR1", () => process.exit(42));' +
+          'console.log("ready");' +
+          'setTimeout(() => process.exit(1), 2000);',
+      ],
+      { stdio: ['ignore', 'pipe', 'inherit'] },
+    );
+
+    const exited = new Promise<number>((res) => child.on('exit', (c) => res(c ?? -1)));
+
+    // Wait for the readiness line, not a sleep. Racing it against exit turns a
+    // child that dies during startup into a named failure instead of a hang.
+    await Promise.race([
+      once(child.stdout!, 'data'),
+      exited.then((c) => {
+        throw new Error(`stand-in daemon exited ${c} before signalling ready`);
+      }),
     ]);
-    // Give the child a moment to install its signal handler.
-    await new Promise((r) => setTimeout(r, 400));
 
     sendDaemonPing({ pid: child.pid!, port: 0, startedAt: '' });
 
-    const code = await new Promise<number>((res) =>
-      child.on('exit', (c) => res(c ?? -1)),
-    );
-    expect(code).toBe(42);
+    expect(await exited).toBe(42);
   });
 });
