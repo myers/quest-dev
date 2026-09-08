@@ -5,6 +5,7 @@
 import which from 'which';
 import net from 'net';
 import { execCommand, execCommandFull } from './exec.js';
+import type { ExecOptions, ExecResult } from './exec.js';
 import { verbose } from './verbose.js';
 import { cdpPortForSerial } from './device-id.js';
 
@@ -35,6 +36,19 @@ export function adbArgs(...args: string[]): string[] {
   }
   return args;
 }
+
+/**
+ * Runs `adb <args>` and hands back the full result (exit code included).
+ * The single seam for every adb call that needs more than stdout: the
+ * install (which streams progress through `opts.onStderr`), the pidof
+ * liveness probe, and the panel-composited probes. Tests inject a fake so
+ * nothing reaches the real binary.
+ */
+export type AdbExecRunner = (args: string[], opts?: ExecOptions) => Promise<ExecResult>;
+
+/** The default AdbExecRunner: the real `adb` binary, device flag applied. */
+export const realAdbExec: AdbExecRunner = (args, opts) =>
+  execCommandFull('adb', adbArgs(...args), opts);
 
 /**
  * Get browser process PID
@@ -789,13 +803,13 @@ export function parsePanelState(dumpsys: string, packageName: string): PanelStat
     : 'not-composited';
 }
 
-async function panelState(packageName: string): Promise<PanelState> {
-  const result = await execCommandFull('adb', adbArgs('shell', 'dumpsys', 'activity', 'activities'));
+async function panelState(packageName: string, adb: AdbExecRunner): Promise<PanelState> {
+  const result = await adb(['shell', 'dumpsys', 'activity', 'activities']);
   return parsePanelState(result.stdout, packageName);
 }
 
-async function isDisplayAsleep(): Promise<boolean> {
-  const result = await execCommandFull('adb', adbArgs('shell', 'dumpsys', 'power'));
+async function isDisplayAsleep(adb: AdbExecRunner): Promise<boolean> {
+  const result = await adb(['shell', 'dumpsys', 'power']);
   return result.stdout.includes('mWakefulness=Asleep');
 }
 
@@ -813,9 +827,9 @@ export function parseBackgroundReason(logcat: string, packageName: string): stri
 }
 
 /** The VR shell's own reason for backgrounding this package's panel, if it logged one. */
-async function panelBackgroundReason(packageName: string): Promise<string | null> {
+async function panelBackgroundReason(packageName: string, adb: AdbExecRunner): Promise<string | null> {
   try {
-    const result = await execCommandFull('adb', adbArgs('logcat', '-d', '-b', 'main', '-t', '2000'));
+    const result = await adb(['logcat', '-d', '-b', 'main', '-t', '2000']);
     return parseBackgroundReason(result.stdout, packageName);
   } catch {
     return null;
@@ -833,38 +847,37 @@ async function panelBackgroundReason(packageName: string): Promise<string | null
  */
 export async function waitForPanelComposited(
   packageName: string,
-  opts: { tries?: number; timeoutMs?: number; pollMs?: number } = {}
+  opts: { tries?: number; timeoutMs?: number; pollMs?: number; adb?: AdbExecRunner } = {}
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const tries = opts.tries ?? 3;
   const timeoutMs = opts.timeoutMs ?? 20000;
   const pollMs = opts.pollMs ?? 2000;
+  const adb = opts.adb ?? realAdbExec;
 
   let state: PanelState = 'no-task';
   for (let attempt = 1; attempt <= tries; attempt++) {
     const deadline = Date.now() + timeoutMs;
     do {
-      state = await panelState(packageName);
+      state = await panelState(packageName, adb);
       verbose('waitForPanelComposited:', packageName, state, `(attempt ${attempt}/${tries})`);
       if (state === 'composited') return { ok: true };
       await new Promise(r => setTimeout(r, pollMs));
     } while (Date.now() < deadline);
 
     // Relaunching cannot wake a sleeping display, so don't burn three attempts on it.
-    if (await isDisplayAsleep()) break;
+    if (await isDisplayAsleep(adb)) break;
     if (attempt < tries) {
       console.log(`Panel not composited (${state}); relaunching ${packageName} (${attempt}/${tries - 1})`);
-      await execCommandFull('adb', adbArgs(
-        'shell', 'monkey', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1',
-      ));
+      await adb(['shell', 'monkey', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1']);
     }
   }
 
-  if (await isDisplayAsleep()) {
+  if (await isDisplayAsleep(adb)) {
     return { ok: false, error:
       `${packageName} launched but the Quest display is asleep, so the VR shell is not ` +
       `compositing its panel. Nothing that waits on first draw will run. Fix: quest-dev stay-awake` };
   }
-  const reason = await panelBackgroundReason(packageName);
+  const reason = await panelBackgroundReason(packageName, adb);
   return { ok: false, error:
     `${packageName} launched but the VR shell is not compositing its panel (task ${state}` +
     `${reason ? `, backgrounded due to: ${reason}` : ''}) after ${tries} launches. ` +

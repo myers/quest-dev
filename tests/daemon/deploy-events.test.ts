@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parseIncrementalProgress, type ProgressUpdate, collectDeployEvents, deploy, type DeployEvent } from '../../src/daemon/deploy.js';
 import { vi } from 'vitest';
 import * as adbModuleNs from '../../src/utils/adb.js';
@@ -292,5 +292,130 @@ describe('deploy() event sequence', () => {
     // The orphan is stopped by the conflict scan; the target package by
     // deploy's own force-stop -- both through the injected runner.
     expect(forceStopped).toEqual(['com.bevychromium', 'net.monoloco.keyboarddemo']);
+  });
+});
+
+// The seam these tests defend: deploy() must reach the real `adb` binary from
+// nowhere. Before this, the install spawn, the pidof probe and
+// waitForPanelComposited each shelled out directly, so the first happy-path
+// test anyone wrote hung on a real device. Every test below stubs the exec
+// module to hang forever — any path that escapes the injected runner fails on
+// the vitest timeout instead of quietly passing.
+describe('deploy() happy path through the injected adb seam', () => {
+  const COMPOSITED_TASK =
+    '    * Task{7a80656 #19817 type=standard A=10064:net.monoloco.chromium U=0 ' +
+    'rootTaskId=19816 visible=true visibleRequested=true mode=multi-window sz=1}';
+
+  const fakeLogcat = () =>
+    ({
+      start: vi.fn(),
+      status: () => ({ file: '/dev/null' }),
+      scanForCrash: () => ({ crashed: false, lines: [] }),
+      readTail: () => [],
+    }) as any;
+
+  type ExecOpts = { env?: NodeJS.ProcessEnv; onStderr?: (chunk: string) => void };
+
+  /** adb stand-in: a healthy device, with incremental progress on install. */
+  const fakeAdbExec = (over: Record<string, { stdout?: string; stderr?: string; code?: number }> = {}) =>
+    vi.fn(async (args: string[], opts?: ExecOpts) => {
+      const cmd = args.join(' ');
+      const hit = Object.keys(over).find((k) => cmd.includes(k));
+      if (args[0] === 'install' && !hit) {
+        for (let n = 10; n <= 100; n += 10) opts?.onStderr?.(`in priority: ${n} of 100\n`);
+        return { stdout: 'Success\n', stderr: '', code: 0 };
+      }
+      if (hit) return { stdout: '', stderr: '', code: 0, ...over[hit] };
+      if (cmd.includes('pidof')) return { stdout: '12345\n', stderr: '', code: 0 };
+      if (cmd.includes('dumpsys activity activities')) return { stdout: COMPOSITED_TASK, stderr: '', code: 0 };
+      return { stdout: '', stderr: '', code: 0 };
+    });
+
+  let apk = '';
+  beforeEach(() => {
+    // Any escape from the seam blocks forever -> the test times out.
+    vi.mocked(exec).execCommandFull.mockClear();
+    vi.mocked(exec).execCommandFull.mockImplementation(() => new Promise(() => {}));
+    vi.mocked(exec).execCommand.mockImplementation(() => new Promise(() => {}));
+    apk = join(tmpdir(), `deploy-seam-${process.pid}.apk`);
+    writeFileSync(apk, 'not-a-real-apk');
+  });
+  afterEach(() => {
+    for (const f of [apk, `${apk}.idsig`]) {
+      try { unlinkSync(f); } catch { /* ignore */ }
+    }
+  });
+
+  const run = async (adbExec: ReturnType<typeof fakeAdbExec>) => {
+    const { events, push } = collectDeployEvents();
+    await deploy(
+      {
+        apkPath: apk,
+        pin: '1234',
+        crashWaitMs: 0,
+        onEvent: push,
+        adb: vi.fn(async () => ''),
+        adbExec,
+        targetPackage: 'net.monoloco.chromium',
+      },
+      { isEnabled: true, turnOn: vi.fn().mockResolvedValue(undefined) } as any,
+      fakeLogcat(),
+    );
+    return events;
+  };
+
+  it('runs install -> pidof -> panel-composited to done ok with adb stubbed out', async () => {
+    writeFileSync(`${apk}.idsig`, 'sig'); // incremental install path
+    const adbExec = fakeAdbExec();
+    const events = await run(adbExec);
+
+    expect(events.at(-1)).toMatchObject({ type: 'done', ok: true, package: 'net.monoloco.chromium' });
+    const cmds = adbExec.mock.calls.map((c) => c[0].join(' '));
+    expect(cmds).toContainEqual(expect.stringContaining('install -r'));
+    expect(cmds).toContainEqual('shell pidof net.monoloco.chromium');
+    expect(cmds).toContainEqual('shell dumpsys activity activities');
+    // Nothing fell back to the real binary.
+    expect(vi.mocked(exec).execCommandFull).not.toHaveBeenCalled();
+  });
+
+  it('streams install progress from the injected runner stderr', async () => {
+    writeFileSync(`${apk}.idsig`, 'sig');
+    const adbExec = fakeAdbExec();
+    const events = await run(adbExec);
+
+    const progress = events.filter((e) => e.type === 'install_progress');
+    expect(progress.length).toBeGreaterThanOrEqual(9);
+    expect(progress.at(-1)).toMatchObject({ type: 'install_progress', totalBlocks: 100, pct: 100 });
+    expect(events.find((e) => e.type === 'installed')).toMatchObject({
+      blocksTransferred: 10, totalBlocks: 100, bytesTransferred: 10 * 4096,
+    });
+    // The incremental trace only happens if the runner got the env through.
+    const installCall = adbExec.mock.calls.find((c) => c[0][0] === 'install');
+    expect(installCall?.[1]?.env).toMatchObject({ ADB_TRACE: 'incremental' });
+  });
+
+  it('installs without the progress env when there is no .idsig', async () => {
+    const adbExec = fakeAdbExec();
+    const events = await run(adbExec);
+
+    const installCall = adbExec.mock.calls.find((c) => c[0][0] === 'install');
+    expect(installCall?.[1]).toBeUndefined();
+    expect(events.find((e) => e.type === 'install_progress')).toBeUndefined();
+    expect(events.at(-1)).toMatchObject({ type: 'done', ok: true });
+  });
+
+  it('reports the process as dead when the injected pidof probe fails', async () => {
+    const events = await run(fakeAdbExec({ pidof: { stdout: '', stderr: '', code: 1 } }));
+    expect(events.at(-1)).toMatchObject({
+      type: 'done', ok: false, crashed: true,
+      error: expect.stringContaining('Process not running'),
+    });
+  });
+
+  it('fails the deploy when the injected install returns non-zero', async () => {
+    const events = await run(fakeAdbExec({ install: { stderr: 'Failure [INSTALL_FAILED_INVALID_APK]', code: 1 } }));
+    expect(events.at(-1)).toMatchObject({
+      type: 'done', ok: false, error: expect.stringContaining('Install failed (exit 1)'),
+    });
   });
 });

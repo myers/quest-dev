@@ -66,13 +66,27 @@ export function execCommandStreaming(command: string, args: string[] = []): Prom
   });
 }
 
+export interface ExecOptions {
+  /** Extra environment variables, merged over process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Called with each stderr chunk as it arrives, for progress parsing. */
+  onStderr?: (chunk: string) => void;
+}
+
 /**
- * Execute a shell command and return full result (doesn't throw on non-zero exit)
+ * Execute a shell command and return full result (doesn't throw on non-zero exit).
+ * `opts.onStderr` streams stderr chunks live, so a caller can parse progress
+ * without reaching for spawn() itself (and without losing the injection seam).
  */
-export function execCommandFull(command: string, args: string[] = []): Promise<ExecResult> {
+export function execCommandFull(
+  command: string,
+  args: string[] = [],
+  opts: ExecOptions = {},
+): Promise<ExecResult> {
   return new Promise((resolve) => {
     const proc = spawn(command, args, {
       stdio: 'pipe',
+      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
     });
 
     let stdout = '';
@@ -86,7 +100,9 @@ export function execCommandFull(command: string, args: string[] = []): Promise<E
 
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        stderr += data.toString();
+        const chunk = data.toString();
+        stderr += chunk;
+        opts.onStderr?.(chunk);
       });
     }
 

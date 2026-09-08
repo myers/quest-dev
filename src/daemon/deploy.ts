@@ -5,11 +5,16 @@
 
 import { resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
-import { spawn } from "node:child_process";
-import { execCommand, execCommandFull } from "../utils/exec.js";
+import { execCommand } from "../utils/exec.js";
 import type { ExecResult } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
-import { adbArgs, ensureAdbHealthy, waitForPanelComposited } from "../utils/adb.js";
+import {
+  adbArgs,
+  ensureAdbHealthy,
+  realAdbExec,
+  waitForPanelComposited,
+  type AdbExecRunner,
+} from "../utils/adb.js";
 import {
   resolvePortConflicts,
   type AdbCommandRunner,
@@ -35,10 +40,15 @@ export interface DeployOptions {
    * Adb command runner for every plain `adb <args>` call deploy() makes —
    * the debugging-port conflict scan, the force-stop, and the launch.
    * Defaults to the real `adb` binary via adbArgs(); tests inject a mock.
-   * (Install and the pidof probe need an exit code, so they still go
-   * through execCommandFull directly.)
    */
   adb?: AdbCommandRunner;
+  /**
+   * Adb runner for the calls that need the exit code as well as stdout: the
+   * install (whose stderr streams incremental progress), the pidof liveness
+   * probe, and waitForPanelComposited's dumpsys/logcat probes. Defaults to
+   * the real `adb` binary; tests inject a fake so no path shells out.
+   */
+  adbExec?: AdbExecRunner;
   /**
    * Target package name. When supplied, skips APK package-name extraction.
    * Used by tests to drive the port-conflict path without a real APK.
@@ -166,57 +176,33 @@ export function parseIncrementalProgress(
 }
 
 async function installWithProgress(
-  absPath: string,
   adbArgsList: string[],
   hasIdsig: boolean,
   onEvent: (event: DeployEvent) => void,
+  adbExec: AdbExecRunner,
 ): Promise<InstallResult> {
   if (!hasIdsig) {
-    const result = await execCommandFull("adb", adbArgsList);
+    const result = await adbExec(adbArgsList);
     return { ...result, blocksTransferred: 0, totalBlocks: 0 };
   }
 
-  return new Promise((resolve) => {
-    const env = { ...process.env, ADB_TRACE: "incremental" };
-    const proc = spawn("adb", adbArgsList, { stdio: "pipe", env });
-
-    let stdout = "";
-    let stderr = "";
-    let totalBlocks = 0;
-    let blocksTransferred = 0;
-
-    const parser = parseIncrementalProgress((u) => {
-      if (u.kind === 'progress') {
-        onEvent({ type: 'install_progress', blocks: u.blocks, totalBlocks: u.totalBlocks, pct: u.pct });
-      } else {
-        blocksTransferred = u.blocksTransferred;
-        totalBlocks = u.totalBlocks;
-      }
-    });
-
-    if (proc.stdout) {
-      proc.stdout.on("data", (data) => {
-        stdout += data.toString();
-      });
+  let totalBlocks = 0;
+  let blocksTransferred = 0;
+  const parser = parseIncrementalProgress((u) => {
+    if (u.kind === 'progress') {
+      onEvent({ type: 'install_progress', blocks: u.blocks, totalBlocks: u.totalBlocks, pct: u.pct });
+    } else {
+      blocksTransferred = u.blocksTransferred;
+      totalBlocks = u.totalBlocks;
     }
-
-    if (proc.stderr) {
-      proc.stderr.on("data", (data) => {
-        const chunk = data.toString();
-        stderr += chunk;
-        parser.feed(chunk);
-      });
-    }
-
-    proc.on("close", (code) => {
-      parser.end();
-      resolve({ stdout, stderr, code: code ?? 1, blocksTransferred, totalBlocks });
-    });
-
-    proc.on("error", (err) => {
-      resolve({ stdout, stderr: err.message, code: 1, blocksTransferred: 0, totalBlocks: 0 });
-    });
   });
+
+  const result = await adbExec(adbArgsList, {
+    env: { ADB_TRACE: "incremental" },
+    onStderr: (chunk) => parser.feed(chunk),
+  });
+  parser.end();
+  return { ...result, blocksTransferred, totalBlocks };
 }
 
 /**
@@ -233,6 +219,7 @@ export async function deploy(
     pin,
     onEvent,
     adb = (args: string[]) => execCommand("adb", adbArgs(...args)),
+    adbExec = realAdbExec,
   } = options;
   const absPath = resolve(apkPath);
 
@@ -348,10 +335,10 @@ export async function deploy(
   // Install APK
   const installStart = Date.now();
   const installResult = await installWithProgress(
-    absPath,
-    adbArgs("install", "-r", absPath),
+    ["install", "-r", absPath],
     hasIdsig,
     onEvent,
+    adbExec,
   );
   const installSecs = parseFloat(((Date.now() - installStart) / 1000).toFixed(1));
   verbose("Install stdout:", installResult.stdout.trim());
@@ -444,11 +431,7 @@ export async function deploy(
   }
 
   // Verify process is still running
-  const psResult = await execCommandFull("adb", adbArgs(
-    "shell",
-    "pidof",
-    packageName,
-  ));
+  const psResult = await adbExec(["shell", "pidof", packageName]);
   const pid = psResult.stdout.trim();
   const processAlive = psResult.code === 0 && pid.length > 0;
 
@@ -470,7 +453,7 @@ export async function deploy(
   // A panel the VR shell backgrounded is not a crash and its process stays
   // alive, so everything above passes while nothing is composited -- and for a
   // Bevy panel that reads as "BRP stopped responding", not as a failed deploy.
-  const composited = await waitForPanelComposited(packageName);
+  const composited = await waitForPanelComposited(packageName, { adb: adbExec });
   if (!composited.ok) {
     onEvent({
       type: 'done',
