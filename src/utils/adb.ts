@@ -54,47 +54,80 @@ async function getBrowserPID(packageName: string): Promise<number | null> {
   }
 }
 
+/** The package that owns the bare `chrome_devtools_remote` socket on Quest:
+ * the VR shell's browser. Verified on a Quest 3 (2G0YC1ZF7V0HP1) --
+ * `com.oculus.browser` (pid 7903) binds `@chrome_devtools_remote` while
+ * `net.monoloco.chromium` (pid 10063) binds `@chrome_devtools_remote_10063`. */
+const DEFAULT_BROWSER = 'com.oculus.browser';
+
 /**
- * Detect CDP socket for a browser
- * Returns socket name (e.g., "chrome_devtools_remote_12345")
+ * Pick the CDP socket for `packageName` out of `/proc/net/unix` text. Pure.
+ *
+ * `chrome_devtools_remote_<pid>` is ours whenever it is bound. The *bare*
+ * `chrome_devtools_remote` is not a generic fallback -- it is a real socket
+ * owned by whichever app bound it, which on Quest is the VR shell's browser.
+ * Handing it back for any other package forwards the port at somebody else's
+ * devtools: `cdp-cli tabs` answers, the tabs are not ours, and nothing in the
+ * output says so. That has been mistaken for a live Chromium three times.
+ *
+ * Returns null when the requested package has no socket -- the caller's cue to
+ * say so, not to substitute.
  */
-async function detectCDPSocket(packageName: string): Promise<string> {
-  const pid = await getBrowserPID(packageName);
-
-  if (pid) {
-    // Try PID-based socket, with retries (socket may take a moment to appear)
-    const socketName = `chrome_devtools_remote_${pid}`;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const result = await execCommandFull('adb', adbArgs(
-          'shell', 'cat', '/proc/net/unix',
-        ));
-        if (result.stdout.includes(socketName)) {
-          verbose('detectCDPSocket: found PID-specific socket:', socketName, `(attempt ${attempt + 1})`);
-          return socketName;
-        }
-      } catch {
-        // ignore
-      }
-      if (attempt < 4) {
-        verbose('detectCDPSocket: PID-specific socket not found yet, retrying in 1s...', `(attempt ${attempt + 1})`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-    verbose('detectCDPSocket: PID-specific socket not found after retries:', socketName);
+export function pickCdpSocket(
+  packageName: string,
+  pid: number | null,
+  procNetUnix: string,
+): string | null {
+  if (pid !== null) {
+    const named = `chrome_devtools_remote_${pid}`;
+    // Anchored: pid 408 must not match a socket bound by pid 4083.
+    if (new RegExp(`${named}(?![0-9])`).test(procNetUnix)) return named;
   }
-
-  // Default: generic socket (Quest Browser)
-  verbose('detectCDPSocket: falling back to generic chrome_devtools_remote');
-  return 'chrome_devtools_remote';
+  return packageName === DEFAULT_BROWSER ? 'chrome_devtools_remote' : null;
 }
 
 /**
- * Get CDP port for a socket.
- * Always use 9223 regardless of socket type for consistency.
+ * Detect the CDP socket for a browser.
+ * Returns the socket name (e.g. "chrome_devtools_remote_12345") plus the pid it
+ * looked for, or `socket: null` when the package has published none.
  */
-function getCDPPortForSocket(_socket: string): number {
-  return CDP_PORT;
+async function detectCDPSocket(packageName: string): Promise<{ socket: string | null; pid: number | null }> {
+  const pid = await getBrowserPID(packageName);
+
+  // No pid means no `chrome_devtools_remote_<pid>` can exist; re-reading
+  // /proc/net/unix five times cannot change that.
+  if (pid === null) return { socket: pickCdpSocket(packageName, null, ''), pid };
+
+  // The socket may take a moment to appear after launch.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    let procNetUnix = '';
+    try {
+      procNetUnix = (await execCommandFull('adb', adbArgs('shell', 'cat', '/proc/net/unix'))).stdout;
+    } catch {
+      // ignore
+    }
+    const socket = pickCdpSocket(packageName, pid, procNetUnix);
+    if (socket) {
+      verbose('detectCDPSocket: picked socket:', socket, `(attempt ${attempt + 1})`);
+      return { socket, pid };
+    }
+    if (attempt < 4) {
+      verbose('detectCDPSocket: socket not found yet, retrying in 1s...', `(attempt ${attempt + 1})`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  verbose('detectCDPSocket: no socket for', packageName, 'pid', pid);
+  return { socket: null, pid };
+}
+
+/** Message for a package that published no CDP socket. */
+function noSocketMessage(packageName: string, pid: number | null): string {
+  const looked = pid === null
+    ? `${packageName} is not running`
+    : `chrome_devtools_remote_${pid} is not bound (pid ${pid})`;
+  return `No CDP socket for ${packageName}: ${looked}. `
+    + `Not falling back to the bare chrome_devtools_remote -- that socket belongs to ${DEFAULT_BROWSER}.`;
 }
 
 /**
@@ -311,6 +344,33 @@ export async function resolveCdpPort(
   return firstFreePort(preferred, isFree);
 }
 
+/** Drop any devtools forward on `port`, so nothing is left pointing at a socket
+ * we could not confirm is ours. */
+async function removeDevtoolsForward(port: number): Promise<void> {
+  const forwardList = await execCommand('adb', adbArgs('forward', '--list')).catch(() => '');
+  if (new RegExp(`tcp:${port}\\s+localabstract:\\S*devtools_remote`).test(forwardList)) {
+    verbose('removeDevtoolsForward: dropping unverified forward on port', port);
+    await execCommandFull('adb', adbArgs('forward', '--remove', `tcp:${port}`));
+  }
+}
+
+/** Forward the port when the socket is known. When it is not, say which package
+ * and pid we looked for and drop any existing forward, rather than leaving the
+ * caller pointed at another app's devtools. */
+async function applyCdpForward(
+  socket: string | null,
+  cdpPort: number,
+  packageName: string,
+  pid: number | null,
+): Promise<void> {
+  if (socket) {
+    await ensureCdpForward(socket, cdpPort);
+    return;
+  }
+  console.log(noSocketMessage(packageName, pid));
+  await removeDevtoolsForward(cdpPort);
+}
+
 /**
  * Point `tcp:<cdpPort>` at `localabstract:<cdpSocket>`, idempotently.
  *
@@ -360,8 +420,8 @@ export async function ensurePortForwarding(
 ): Promise<void> {
   try {
     // Detect CDP socket and port for this browser
-    const cdpSocket = await detectCDPSocket(browser);
-    const cdpPort = cdpPortOverride ?? getCDPPortForSocket(cdpSocket);
+    const { socket, pid } = await detectCDPSocket(browser);
+    const cdpPort = cdpPortOverride ?? CDP_PORT;
 
     // Check reverse forwarding (Quest -> Host for dev server)
     const reverseList = await execCommand('adb', adbArgs('reverse', '--list'));
@@ -374,7 +434,7 @@ export async function ensurePortForwarding(
       console.log(`ADB reverse port forwarding set up: Quest:${port} -> Host:${port}`);
     }
 
-    await ensureCdpForward(cdpSocket, cdpPort);
+    await applyCdpForward(socket, cdpPort, browser, pid);
   } catch (error) {
     console.error('Failed to set up port forwarding:', (error as Error).message);
     process.exit(1);
@@ -423,8 +483,8 @@ export async function launchBrowser(url: string, browser: string = 'com.oculus.b
 /**
  * Get CDP port.
  *
- * The port never depended on the socket -- getCDPPortForSocket() ignores its
- * argument and always answers CDP_PORT -- so the detectCDPSocket() call this
+ * The port never depended on the socket -- it is always CDP_PORT unless the
+ * caller overrides it -- so the detectCDPSocket() call this
  * used to make was a multi-second adb round trip (pidof plus up to five
  * `cat /proc/net/unix` retries) whose result was discarded. It also made
  * tests/adb.test.ts depend on a live device and time out under host load
@@ -446,10 +506,10 @@ export async function ensureCDPForwarding(
 ): Promise<void> {
   try {
     // Detect CDP socket and port for this browser
-    const cdpSocket = await detectCDPSocket(browser);
-    const cdpPort = cdpPortOverride ?? getCDPPortForSocket(cdpSocket);
+    const { socket, pid } = await detectCDPSocket(browser);
+    const cdpPort = cdpPortOverride ?? CDP_PORT;
 
-    await ensureCdpForward(cdpSocket, cdpPort);
+    await applyCdpForward(socket, cdpPort, browser, pid);
   } catch (error) {
     console.error('Failed to set up CDP forwarding:', (error as Error).message);
     process.exit(1);
@@ -464,10 +524,18 @@ export async function ensureCDPForwarding(
 export async function refreshCDPForwarding(
   browser: string = 'com.oculus.browser',
   cdpPortOverride?: number
-): Promise<void> {
+): Promise<boolean> {
   try {
-    const cdpSocket = await detectCDPSocket(browser);
-    const cdpPort = cdpPortOverride ?? getCDPPortForSocket(cdpSocket);
+    const { socket: cdpSocket, pid } = await detectCDPSocket(browser);
+    const cdpPort = cdpPortOverride ?? CDP_PORT;
+
+    // Post-launch there is no "not yet": a running browser that published no
+    // socket of its own has no CDP, and the bare socket is another app's.
+    if (!cdpSocket) {
+      console.error(`Error: ${noSocketMessage(browser, pid)}`);
+      await removeDevtoolsForward(cdpPort);
+      return false;
+    }
 
     // Check if forwarding already points to the correct socket
     const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
@@ -478,7 +546,7 @@ export async function refreshCDPForwarding(
     const expectedForward = `tcp:${cdpPort} localabstract:${cdpSocket}`;
     if (forwardList.includes(expectedForward)) {
       verbose('refreshCDPForwarding: forwarding already correct');
-      return; // Already correct
+      return true; // Already correct
     }
 
     // Remove existing forwarding on CDP port and re-create with correct socket
@@ -489,9 +557,11 @@ export async function refreshCDPForwarding(
 
     await execCommand('adb', adbArgs('forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`));
     console.log(`CDP forwarding updated: Host:${cdpPort} -> Quest:${cdpSocket}`);
+    return true;
   } catch (error) {
     // Non-fatal: CDP may still work with existing forwarding
     console.log('Warning: Could not refresh CDP forwarding:', (error as Error).message);
+    return true;
   }
 }
 

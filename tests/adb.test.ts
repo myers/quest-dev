@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPortListening, getCDPPort, firstFreePort, devtoolsForwards, resolveCdpPort, parsePanelState, parseBackgroundReason } from '../src/utils/adb.js';
+import { isPortListening, getCDPPort, firstFreePort, devtoolsForwards, resolveCdpPort, parsePanelState, parseBackgroundReason, pickCdpSocket } from '../src/utils/adb.js';
 import { cdpPortForSerial } from '../src/utils/device-id.js';
 import net from 'net';
 
@@ -196,5 +196,39 @@ describe('parseBackgroundReason', () => {
 
   it('returns null when the shell logged no reason', () => {
     expect(parseBackgroundReason('', 'net.monoloco.chromium')).toBeNull();
+  });
+});
+
+describe('pickCdpSocket', () => {
+  // Verbatim `cat /proc/net/unix | grep devtools` from a Quest 3
+  // (2G0YC1ZF7V0HP1): com.oculus.browser (pid 7903) owns the *bare* socket,
+  // net.monoloco.chromium (pid 10063) owns the pid-suffixed one.
+  const procNetUnix = [
+    '0000000000000000: 00000002 00000000 00010000 0001 01 1862869 @chrome_devtools_remote',
+    '0000000000000000: 00000002 00000000 00010000 0001 01 2498869 @chrome_devtools_remote_10063',
+  ].join('\n');
+
+  it('picks the pid-specific socket for our Chromium', () => {
+    expect(pickCdpSocket('net.monoloco.chromium', 10063, procNetUnix))
+      .toBe('chrome_devtools_remote_10063');
+  });
+
+  // The trap: the bare socket is a real socket owned by the VR shell's browser.
+  // Handing it back here forwards the port at somebody else's devtools.
+  it('refuses the bare socket for a package that does not own it', () => {
+    expect(pickCdpSocket('net.monoloco.chromium', 12345, procNetUnix)).toBeNull();
+  });
+
+  it('refuses the bare socket when the package is not running', () => {
+    expect(pickCdpSocket('net.monoloco.chromium', null, procNetUnix)).toBeNull();
+  });
+
+  it('gives the Quest browser the bare socket it owns', () => {
+    expect(pickCdpSocket('com.oculus.browser', 7903, procNetUnix))
+      .toBe('chrome_devtools_remote');
+  });
+
+  it('does not let pid 1006 match the socket bound by pid 10063', () => {
+    expect(pickCdpSocket('net.monoloco.chromium', 1006, procNetUnix)).toBeNull();
   });
 });

@@ -232,7 +232,12 @@ export async function openCommand(
   // chrome_devtools_remote socket and create a PID-specific one instead.
   console.log('Waiting for browser to stabilize...');
   await new Promise(resolve => setTimeout(resolve, browserRunning ? 2000 : 3000));
-  await refreshCDPForwarding(browser, cdpPort);
+  if (!await refreshCDPForwarding(browser, cdpPort)) {
+    // The message naming the package and pid was already printed. Exiting is
+    // the point: the alternative is printing "Done!" over a port forwarded at
+    // the VR shell's devtools, which reads exactly like a live Chromium.
+    process.exit(1);
+  }
 
   // Close other tabs if requested
   if (closeOthers) {
