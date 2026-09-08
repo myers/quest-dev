@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPortListening, getCDPPort, firstFreePort, cdpForwardPort, resolveCdpPort, parsePanelState, parseBackgroundReason } from '../src/utils/adb.js';
+import { isPortListening, getCDPPort, firstFreePort, devtoolsForwards, resolveCdpPort, parsePanelState, parseBackgroundReason } from '../src/utils/adb.js';
 import { cdpPortForSerial } from '../src/utils/device-id.js';
 import net from 'net';
 
@@ -47,31 +47,36 @@ describe('firstFreePort', () => {
   });
 });
 
-describe('cdpForwardPort', () => {
+describe('devtoolsForwards', () => {
   const list = [
     '2G0YC1ZF7V0HP1 tcp:9249 localabstract:chrome_devtools_remote_4083',
     '1WMHHA1234567 tcp:9260 localabstract:chrome_devtools_remote',
   ].join('\n');
 
-  it('finds this device\'s existing CDP forward', () => {
-    expect(cdpForwardPort(list, '2G0YC1ZF7V0HP1')).toBe(9249);
-  });
-
-  it('does not return another device\'s forward', () => {
-    expect(cdpForwardPort(list, 'nosuchserial')).toBeUndefined();
+  it('parses every device\'s devtools forwards', () => {
+    expect(devtoolsForwards(list)).toEqual([
+      { serial: '2G0YC1ZF7V0HP1', port: 9249 },
+      { serial: '1WMHHA1234567', port: 9260 },
+    ]);
   });
 
   it('ignores forwards that are not devtools sockets', () => {
-    const other = '2G0YC1ZF7V0HP1 tcp:9249 localabstract:something_else';
-    expect(cdpForwardPort(other, '2G0YC1ZF7V0HP1')).toBeUndefined();
+    expect(devtoolsForwards('2G0YC1ZF7V0HP1 tcp:9249 localabstract:something_else')).toEqual([]);
   });
 
-  it('returns undefined for an empty list', () => {
-    expect(cdpForwardPort('', '2G0YC1ZF7V0HP1')).toBeUndefined();
+  it('returns nothing for an empty list', () => {
+    expect(devtoolsForwards('')).toEqual([]);
   });
 });
 
 describe('resolveCdpPort', () => {
+  const QUEST3 = '2G0YC1ZF7V0HP1';
+  // cdpPortForSerial is a hash; assert the fixtures line up with it so the
+  // "9249" in these lists means "this device's deterministic port".
+  it('fixture serial hashes to 9249', () => {
+    expect(cdpPortForSerial(QUEST3)).toBe(9249);
+  });
+
   // The leak (iss 28f5eb0): adb listens on its own forwarded port, so probing
   // for a free port walks past it and allocates a new forward every call.
   it('reuses the existing forward instead of probing past it', async () => {
@@ -82,6 +87,46 @@ describe('resolveCdpPort', () => {
       async () => listed,
     );
     expect(port).toBe(9249);
+  });
+
+  // iss 405ee1d: adb does not sort `forward --list`, so a first-match pick
+  // returned whichever stale forward adb happened to print first.
+  it('picks the deterministic port no matter where it sits in the list', async () => {
+    const leaked = [
+      '2G0YC1ZF7V0HP1 tcp:9250 localabstract:chrome_devtools_remote_30901',
+      '2G0YC1ZF7V0HP1 tcp:9262 localabstract:chrome_devtools_remote_5045',
+      '2G0YC1ZF7V0HP1 tcp:9249 localabstract:chrome_devtools_remote_30231',
+      '2G0YC1ZF7V0HP1 tcp:9251 localabstract:chrome_devtools_remote_7279',
+    ].join('\n');
+    for (const list of [leaked, leaked.split('\n').reverse().join('\n')]) {
+      expect(await resolveCdpPort(QUEST3, async () => false, async () => list)).toBe(9249);
+    }
+  });
+
+  // The VR shell owns a real bare `chrome_devtools_remote`; a forward to it on
+  // our port is another app's socket, not a reason to move ports.
+  it('keeps the deterministic port when it forwards the VR shell\'s bare socket', async () => {
+    const port = await resolveCdpPort(
+      QUEST3,
+      async () => false,
+      async () => '2G0YC1ZF7V0HP1 tcp:9249 localabstract:chrome_devtools_remote',
+    );
+    expect(port).toBe(9249);
+  });
+
+  it('yields the deterministic port to the device that owns it, reusing its own lowest forward', async () => {
+    const list = [
+      '1WMHHA1234567 tcp:9249 localabstract:chrome_devtools_remote_4083',
+      '2G0YC1ZF7V0HP1 tcp:9262 localabstract:chrome_devtools_remote_5045',
+      '2G0YC1ZF7V0HP1 tcp:9251 localabstract:chrome_devtools_remote_7279',
+    ].join('\n');
+    expect(await resolveCdpPort(QUEST3, async () => false, async () => list)).toBe(9251);
+  });
+
+  it('probes upward when another device owns the port and we have no forward', async () => {
+    const list = '1WMHHA1234567 tcp:9249 localabstract:chrome_devtools_remote_4083';
+    const port = await resolveCdpPort(QUEST3, async (p) => p > 9249, async () => list);
+    expect(port).toBe(9250);
   });
 
   it('probes from the preferred port when the device has no forward yet', async () => {

@@ -254,38 +254,61 @@ export async function firstFreePort(
   throw new Error(`No free port found at or above ${preferred}`);
 }
 
-/** Port of an existing `adb forward` from `serial` to a devtools socket, if
- * there is one. `adb forward --list` ignores `-s` and prints every device's
- * forwards as `<serial> tcp:<port> localabstract:<socket>`, so the serial is
- * matched here rather than on the command line. */
-export function cdpForwardPort(forwardList: string, serial: string): number | undefined {
+/** Every devtools forward in `adb forward --list` output. adb ignores `-s`
+ * for `--list` and prints every device's forwards as
+ * `<serial> tcp:<port> localabstract:<socket>`, so the serial is matched by
+ * the caller rather than on the command line. The list is *unordered* — adb
+ * prints it in whatever order its internal map yields — so no caller may take
+ * "the first match" and call it deterministic. */
+export function devtoolsForwards(forwardList: string): Array<{ serial: string; port: number }> {
+  const out: Array<{ serial: string; port: number }> = [];
   for (const line of forwardList.split('\n')) {
-    const m = line.trim().match(/^(\S+)\s+tcp:(\d+)\s+localabstract:(\S*devtools_remote\S*)$/);
-    if (m && m[1] === serial) return Number(m[2]);
+    const m = line.trim().match(/^(\S+)\s+tcp:(\d+)\s+localabstract:\S*devtools_remote\S*$/);
+    if (m) out.push({ serial: m[1], port: Number(m[2]) });
   }
-  return undefined;
+  return out;
 }
 
-/** Resolve the actual CDP forward port for a device: reuse the forward this
- * device already has, else start from its deterministic preferred port and
- * probe upward past any in-use port. `isFree` defaults to "nothing is
- * listening on this port".
+/** Resolve the host-side CDP forward port for a device.
  *
- * The reuse is what keeps this idempotent: adb itself listens on a forwarded
- * port, so without it every call probes past its own previous forward and
- * creates a new one, leaking one forward per call until the 128-wide probe
- * window is full. */
+ * The rule, in order, so the answer never depends on `adb forward --list`
+ * ordering:
+ *
+ *   1. This device's deterministic port (`cdpPortForSerial`) whenever it is
+ *      ours or unclaimed. "Ours" covers a stale forward pointing at a dead
+ *      browser pid — `ensureCdpForward()` re-points those — and a forward to
+ *      the VR shell's bare `chrome_devtools_remote`, which is another app's
+ *      socket, not a reason to move ports.
+ *   2. Failing that (another *device* forwards our preferred port, or a
+ *      foreign process listens on it): this device's lowest existing devtools
+ *      forward, so a device that has leaked several forwards converges on one
+ *      instead of allocating yet another.
+ *   3. Failing that: probe upward from the preferred port.
+ *
+ * Rule 1 is also what keeps this idempotent: adb itself listens on every port
+ * it forwards, so an unanchored `firstFreePort` walks past this device's own
+ * previous forward and creates a new one on every call, leaking one forward
+ * per call until the 128-wide probe window is full. */
 export async function resolveCdpPort(
   serial: string,
   isFree: (port: number) => Promise<boolean> = async (p) => !(await isPortListening(p)),
   listForwards: () => Promise<string> = () => execCommand('adb', ['forward', '--list']),
 ): Promise<number> {
-  const existing = cdpForwardPort(await listForwards().catch(() => ''), serial);
-  if (existing !== undefined) {
-    verbose('resolveCdpPort: reusing existing forward on port', existing, 'for', serial);
-    return existing;
+  const preferred = cdpPortForSerial(serial);
+  const forwards = devtoolsForwards(await listForwards().catch(() => ''));
+  const owner = forwards.find((f) => f.port === preferred);
+
+  if (owner ? owner.serial === serial : await isFree(preferred)) {
+    verbose('resolveCdpPort: using deterministic port', preferred, 'for', serial);
+    return preferred;
   }
-  return firstFreePort(cdpPortForSerial(serial), isFree);
+
+  const mine = forwards.filter((f) => f.serial === serial).map((f) => f.port).sort((a, b) => a - b);
+  if (mine.length > 0) {
+    verbose('resolveCdpPort: port', preferred, 'is not ours; reusing lowest existing forward', mine[0], 'for', serial);
+    return mine[0];
+  }
+  return firstFreePort(preferred, isFree);
 }
 
 /**
