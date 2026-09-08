@@ -254,13 +254,37 @@ export async function firstFreePort(
   throw new Error(`No free port found at or above ${preferred}`);
 }
 
-/** Resolve the actual CDP forward port for a device: start from the device's
- * deterministic preferred port and probe upward past any in-use port.
- * `isFree` defaults to "nothing is listening on this port". */
+/** Port of an existing `adb forward` from `serial` to a devtools socket, if
+ * there is one. `adb forward --list` ignores `-s` and prints every device's
+ * forwards as `<serial> tcp:<port> localabstract:<socket>`, so the serial is
+ * matched here rather than on the command line. */
+export function cdpForwardPort(forwardList: string, serial: string): number | undefined {
+  for (const line of forwardList.split('\n')) {
+    const m = line.trim().match(/^(\S+)\s+tcp:(\d+)\s+localabstract:(\S*devtools_remote\S*)$/);
+    if (m && m[1] === serial) return Number(m[2]);
+  }
+  return undefined;
+}
+
+/** Resolve the actual CDP forward port for a device: reuse the forward this
+ * device already has, else start from its deterministic preferred port and
+ * probe upward past any in-use port. `isFree` defaults to "nothing is
+ * listening on this port".
+ *
+ * The reuse is what keeps this idempotent: adb itself listens on a forwarded
+ * port, so without it every call probes past its own previous forward and
+ * creates a new one, leaking one forward per call until the 128-wide probe
+ * window is full. */
 export async function resolveCdpPort(
   serial: string,
   isFree: (port: number) => Promise<boolean> = async (p) => !(await isPortListening(p)),
+  listForwards: () => Promise<string> = () => execCommand('adb', ['forward', '--list']),
 ): Promise<number> {
+  const existing = cdpForwardPort(await listForwards().catch(() => ''), serial);
+  if (existing !== undefined) {
+    verbose('resolveCdpPort: reusing existing forward on port', existing, 'for', serial);
+    return existing;
+  }
   return firstFreePort(cdpPortForSerial(serial), isFree);
 }
 
