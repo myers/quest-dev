@@ -512,14 +512,7 @@ cli.command(
             );
           }
           break;
-        case 'install_progress':
-          process.stdout.write(`\r  Streaming: ${event.blocks}/${event.totalBlocks} blocks (${event.pct}%)`);
-          break;
         case 'installed':
-          if (event.totalBlocks) {
-            const kb = Math.round((event.bytesTransferred ?? 0) / 1024);
-            process.stdout.write(`\r  Transferred: ${event.blocksTransferred}/${event.totalBlocks} blocks (~${kb}KB)\n`);
-          }
           console.log(`APK installed (${event.installSecs}s)`);
           break;
         case 'launching':
@@ -555,12 +548,7 @@ cli.command(
       const inst = result.install;
       if (inst) {
         const mode = inst.incremental ? 'incremental' : 'full';
-        if (inst.blocksTransferred !== undefined && inst.totalBlocks) {
-          const kb = Math.round((inst.bytesTransferred ?? 0) / 1024);
-          console.log(`\nInstalled (${mode}, ${inst.installSecs}s): ${inst.blocksTransferred}/${inst.totalBlocks} blocks (~${kb}KB of ${inst.apkSizeMB}MB)`);
-        } else {
-          console.log(`\nInstalled (${mode}, ${inst.installSecs}s)`);
-        }
+        console.log(`\nInstalled (${mode}, ${inst.installSecs}s, ${inst.apkSizeMB}MB APK)`);
       }
       console.log(`Deploy successful: ${result.package} is running`);
       console.log(`Logcat: ${result.logcatFile}`);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseIncrementalProgress, type ProgressUpdate, collectDeployEvents, deploy, type DeployEvent } from '../../src/daemon/deploy.js';
+import { collectDeployEvents, deploy, type DeployEvent } from '../../src/daemon/deploy.js';
 import { vi } from 'vitest';
 import * as adbModuleNs from '../../src/utils/adb.js';
 import * as exec from '../../src/utils/exec.js';
@@ -13,48 +13,6 @@ import { join } from 'node:path';
 // real adb (same pattern as tests/adb-health.test.ts).
 vi.mock('../../src/utils/exec.js');
 
-describe('parseIncrementalProgress', () => {
-  it('emits one update per ~10% of total, plus a final transferred update', () => {
-    const updates: ProgressUpdate[] = [];
-    const parser = parseIncrementalProgress((u) => updates.push(u));
-
-    // 100 blocks total — should emit at 10, 20, 30, … 100, then a final "transferred"
-    for (let n = 1; n <= 100; n++) {
-      parser.feed(`in priority: ${n} of 100\n`);
-    }
-    parser.end();
-
-    const progress = updates.filter((u) => u.kind === 'progress');
-    expect(progress.length).toBeGreaterThanOrEqual(9); // at least 9 ticks at 10%
-    expect(progress.length).toBeLessThanOrEqual(11);
-    expect(progress[0]).toMatchObject({ kind: 'progress', blocks: expect.any(Number), totalBlocks: 100 });
-
-    const transferred = updates.find((u) => u.kind === 'transferred');
-    expect(transferred).toBeDefined();
-    expect(transferred).toMatchObject({ kind: 'transferred', blocksTransferred: 100, totalBlocks: 100 });
-  });
-
-  it('emits no updates when there is no incremental output', () => {
-    const updates: ProgressUpdate[] = [];
-    const parser = parseIncrementalProgress((u) => updates.push(u));
-    parser.feed('Performing Streamed Install\nSuccess\n');
-    parser.end();
-    expect(updates).toEqual([]);
-  });
-
-  it('handles a chunk that splits a match across feed boundaries', () => {
-    const updates: ProgressUpdate[] = [];
-    const parser = parseIncrementalProgress((u) => updates.push(u));
-    parser.feed('in priority: 50 of ');
-    parser.feed('100\n');
-    parser.end();
-    // At 50% we cross the 10% threshold
-    const progress = updates.filter((u) => u.kind === 'progress');
-    expect(progress.length).toBe(1);
-    expect(progress[0]).toMatchObject({ blocks: 50, totalBlocks: 100, pct: 50 });
-  });
-});
-
 describe('DeployEvent type', () => {
   it('exposes the expected event shapes (compile-time check)', () => {
     const events: DeployEvent[] = [
@@ -66,13 +24,12 @@ describe('DeployEvent type', () => {
       { type: 'stay_awake', status: 'enabled' },
       { type: 'stay_awake', status: 'failed', error: 'oops' },
       { type: 'started', package: 'com.example', apkSizeMB: 1, incremental: true },
-      { type: 'install_progress', blocks: 1, totalBlocks: 10, pct: 10 },
       { type: 'installed', installSecs: 1.0 },
       { type: 'launching' },
       { type: 'crash_check', waitMs: 5000 },
       { type: 'done', ok: true, package: 'com.example', crashed: false, logcatFile: '/tmp/x' },
     ];
-    expect(events).toHaveLength(13);
+    expect(events).toHaveLength(12);
   });
 
 });
@@ -378,29 +335,28 @@ describe('deploy() happy path through the injected adb seam', () => {
     expect(vi.mocked(exec).execCommandFull).not.toHaveBeenCalled();
   });
 
-  it('streams install progress from the injected runner stderr', async () => {
-    writeFileSync(`${apk}.idsig`, 'sig');
+  // Regression: deploy used to run the install under ADB_TRACE=incremental and
+  // turn adb's MISSING-BLOCK trace into a "N/M blocks (~KKB)" summary. Those
+  // numbers are a priority-vector index and that vector's size, so the byte
+  // figure was fiction. No trace, no numbers.
+  it('does not fabricate a transferred-bytes figure from adb trace output', async () => {
+    writeFileSync(`${apk}.idsig`, 'sig'); // incremental install path
     const adbExec = fakeAdbExec();
     const events = await run(adbExec);
 
-    const progress = events.filter((e) => e.type === 'install_progress');
-    expect(progress.length).toBeGreaterThanOrEqual(9);
-    expect(progress.at(-1)).toMatchObject({ type: 'install_progress', totalBlocks: 100, pct: 100 });
-    expect(events.find((e) => e.type === 'installed')).toMatchObject({
-      blocksTransferred: 10, totalBlocks: 100, bytesTransferred: 10 * 4096,
-    });
-    // The incremental trace only happens if the runner got the env through.
     const installCall = adbExec.mock.calls.find((c) => c[0][0] === 'install');
-    expect(installCall?.[1]?.env).toMatchObject({ ADB_TRACE: 'incremental' });
+    expect(installCall?.[1]?.env).toBeUndefined();
+    expect(events.find((e) => e.type === 'installed')).toEqual({
+      type: 'installed', installSecs: expect.any(Number),
+    });
   });
 
-  it('installs without the progress env when there is no .idsig', async () => {
+  it('installs plainly when there is no .idsig', async () => {
     const adbExec = fakeAdbExec();
     const events = await run(adbExec);
 
     const installCall = adbExec.mock.calls.find((c) => c[0][0] === 'install');
     expect(installCall?.[1]).toBeUndefined();
-    expect(events.find((e) => e.type === 'install_progress')).toBeUndefined();
     expect(events.at(-1)).toMatchObject({ type: 'done', ok: true });
   });
 

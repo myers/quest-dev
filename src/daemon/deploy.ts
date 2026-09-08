@@ -64,9 +64,6 @@ export interface DeployOptions {
 
 export interface InstallInfo {
   incremental: boolean;
-  blocksTransferred?: number;
-  totalBlocks?: number;
-  bytesTransferred?: number;
   installSecs: number;
   apkSizeMB: number;
 }
@@ -88,8 +85,7 @@ export type DeployEvent =
       stopped: Array<{ packageName: string; uid: number }>;
       skipped: Array<{ uid: number; packageName: string | null }>;
     }
-  | { type: 'install_progress'; blocks: number; totalBlocks: number; pct: number }
-  | { type: 'installed'; installSecs: number; blocksTransferred?: number; totalBlocks?: number; bytesTransferred?: number }
+  | { type: 'installed'; installSecs: number }
   | { type: 'launching' }
   | { type: 'crash_check'; waitMs: number }
   | ({ type: 'done' } & DeployResult);
@@ -115,95 +111,14 @@ async function extractPackageName(apkPath: string): Promise<string> {
   );
 }
 
-/**
- * Install APK with progress reporting for incremental installs.
- * When .idsig exists, uses ADB_TRACE=incremental to parse block transfer progress.
- */
-interface InstallResult extends ExecResult {
-  blocksTransferred: number;
-  totalBlocks: number;
-}
-
-export type ProgressUpdate =
-  | { kind: 'progress'; blocks: number; totalBlocks: number; pct: number }
-  | { kind: 'transferred'; blocksTransferred: number; totalBlocks: number };
-
-interface IncrementalProgressParser {
-  feed(chunk: string): void;
-  end(): void;
-}
-
-/**
- * Parses ADB_TRACE=incremental stderr ("in priority: N of M") into throttled
- * progress updates. Pure: no I/O, no side effects beyond the onUpdate callback.
- * Throttle: emits a `progress` update each time `current` advances by at least
- * 10% of `totalBlocks`. Always emits a final `transferred` update on `end()`
- * if any blocks were seen.
- */
-export function parseIncrementalProgress(
-  onUpdate: (u: ProgressUpdate) => void,
-): IncrementalProgressParser {
-  let buf = '';
-  let totalBlocks = 0;
-  let blocksTransferred = 0;
-  let lastReported = 0;
-
-  return {
-    feed(chunk: string): void {
-      buf += chunk;
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) !== -1) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        const m = line.match(/in priority: (\d+) of (\d+)/);
-        if (!m) continue;
-        const current = parseInt(m[1], 10);
-        totalBlocks = parseInt(m[2], 10);
-        blocksTransferred++;
-        if (totalBlocks > 0 && current - lastReported >= totalBlocks * 0.1) {
-          const pct = Math.round((current / totalBlocks) * 100);
-          onUpdate({ kind: 'progress', blocks: current, totalBlocks, pct });
-          lastReported = current;
-        }
-      }
-    },
-    end(): void {
-      if (totalBlocks > 0) {
-        onUpdate({ kind: 'transferred', blocksTransferred, totalBlocks });
-      }
-    },
-  };
-}
-
-async function installWithProgress(
-  adbArgsList: string[],
-  hasIdsig: boolean,
-  onEvent: (event: DeployEvent) => void,
-  adbExec: AdbExecRunner,
-): Promise<InstallResult> {
-  if (!hasIdsig) {
-    const result = await adbExec(adbArgsList);
-    return { ...result, blocksTransferred: 0, totalBlocks: 0 };
-  }
-
-  let totalBlocks = 0;
-  let blocksTransferred = 0;
-  const parser = parseIncrementalProgress((u) => {
-    if (u.kind === 'progress') {
-      onEvent({ type: 'install_progress', blocks: u.blocks, totalBlocks: u.totalBlocks, pct: u.pct });
-    } else {
-      blocksTransferred = u.blocksTransferred;
-      totalBlocks = u.totalBlocks;
-    }
-  });
-
-  const result = await adbExec(adbArgsList, {
-    env: { ADB_TRACE: "incremental" },
-    onStderr: (chunk) => parser.feed(chunk),
-  });
-  parser.end();
-  return { ...result, blocksTransferred, totalBlocks };
-}
+// No install-progress reporting: adb's only incremental trace is
+// "MISSING BLOCK: reading file %d block %04d (in priority: %d of %d)" from
+// packages/modules/adb/client/incremental_server.cpp, whose numbers are an
+// index into the priority-block vector and that vector's size -- not blocks
+// transferred and not the APK's block count. Any byte figure derived from it
+// is fiction; measured 2026-09-08, a 129.1 MB APK reported "~16KB" one run and
+// "~48KB" the next with identical bytes on the wire. See issue
+// quest-dev-deploy-incremental-bytes-wrong.
 
 /**
  * Run the full deploy sequence.
@@ -334,12 +249,7 @@ export async function deploy(
 
   // Install APK
   const installStart = Date.now();
-  const installResult = await installWithProgress(
-    ["install", "-r", absPath],
-    hasIdsig,
-    onEvent,
-    adbExec,
-  );
+  const installResult = await adbExec(["install", "-r", absPath]);
   const installSecs = parseFloat(((Date.now() - installStart) / 1000).toFixed(1));
   verbose("Install stdout:", installResult.stdout.trim());
   verbose("Install stderr:", installResult.stderr.trim());
@@ -356,25 +266,8 @@ export async function deploy(
     });
     return;
   }
-  const installInfo: InstallInfo = {
-    incremental: hasIdsig,
-    installSecs,
-    apkSizeMB,
-    ...(installResult.totalBlocks > 0 ? {
-      blocksTransferred: installResult.blocksTransferred,
-      totalBlocks: installResult.totalBlocks,
-      bytesTransferred: installResult.blocksTransferred * 4096,
-    } : {}),
-  };
-  onEvent({
-    type: 'installed',
-    installSecs,
-    ...(installResult.totalBlocks > 0 ? {
-      blocksTransferred: installResult.blocksTransferred,
-      totalBlocks: installResult.totalBlocks,
-      bytesTransferred: installResult.blocksTransferred * 4096,
-    } : {}),
-  });
+  const installInfo: InstallInfo = { incremental: hasIdsig, installSecs, apkSizeMB };
+  onEvent({ type: 'installed', installSecs });
 
   // Start logcat capture (clears buffer first)
   await logcat.start();
