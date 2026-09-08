@@ -11,7 +11,7 @@
 import { checkADBPath, getBatteryInfo, formatBatteryInfo, adbArgs, type BatteryInfo } from '../utils/adb.js';
 import { loadPin, loadConfig } from '../utils/config.js';
 import { execCommand } from '../utils/exec.js';
-import { execFileSync, spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import { join, dirname } from 'path';
 import { runtimeDir, sanitizeSerial } from '../utils/paths.js';
@@ -21,6 +21,7 @@ import {
   parseQuestProtections,
   setQuestProtections,
   getQuestProtections,
+  restoreProtectionsSync,
   formatQuestProtections,
 } from '../utils/quest-protections.js';
 
@@ -86,15 +87,35 @@ export async function stayAwakeStatus(): Promise<void> {
 }
 
 /**
- * Manually turn stay-awake off (restore all Quest protections)
+ * Manually turn stay-awake off (restore all Quest protections).
+ *
+ * Prints the readback and throws if the protections are still off — it used to
+ * print "Stay-awake off:" directly above a readout showing all four still off,
+ * and exit 0.
  */
 export async function stayAwakeOff(cliPin?: string): Promise<void> {
   checkADBPath();
   const pin = loadPin(cliPin);
-  await setQuestProtections(pin, true);
+  // GET_PROPERTY is the authority; a SET_PROPERTY rejection only matters when
+  // the readback shows the restore did not take.
+  let setError: string | null = null;
+  try {
+    await setQuestProtections(pin, true);
+  } catch (error) {
+    setError = (error as Error).message;
+  }
   const props = await getQuestProtections();
-  console.log('Stay-awake off:');
+  const stillOff = (Object.keys(props) as (keyof QuestProtections)[]).filter((k) => !props[k]);
+  console.log('Quest protections:');
   console.log(formatQuestProtections(props));
+  if (stillOff.length > 0) {
+    throw new Error(
+      (setError ?? 'SET_PROPERTY reported success but GET_PROPERTY disagrees') +
+      `. These protections are still off: ${stillOff.join(', ')}. The headset is ` +
+      `still in test mode and will not sleep.`,
+    );
+  }
+  console.log('Stay-awake off — guardian, dialogs, autosleep, proximity on');
 }
 
 /**
@@ -117,16 +138,14 @@ export async function stayAwakeWatchdog(parentPid: number, pin: string, serial: 
       console.log('Parent process died, restoring Quest settings...');
       clearInterval(checkParent);
 
-      try {
-        const args = adbArgs(...buildSetPropertyArgs(pin, true));
-        execFileSync('adb', args, { stdio: 'ignore' });
+      const pidFile = stayAwakePidPath(serial);
+      try { fs.unlinkSync(pidFile); } catch {}
 
-        const pidFile = stayAwakePidPath(serial);
-        try { fs.unlinkSync(pidFile); } catch {}
-
+      const error = restoreProtectionsSync(pin);
+      if (error) {
+        console.error(`Failed to restore settings: ${error}`);
+      } else {
         console.log('Stay-awake off — guardian, dialogs, autosleep, proximity on');
-      } catch (err) {
-        console.error('Failed to restore settings:', (err as Error).message);
       }
 
       process.exit(0);
@@ -276,15 +295,15 @@ export async function stayAwakeCommand(
     }
 
     console.log('\nRestoring settings...');
-    try {
-      try { fs.unlinkSync(pidFilePath); } catch {}
+    try { fs.unlinkSync(pidFilePath); } catch {}
 
-      const args = adbArgs(...buildSetPropertyArgs(pin, true));
-      execFileSync('adb', args, { stdio: 'ignore' });
-      console.log('Stay-awake off — guardian, dialogs, autosleep on');
-    } catch (error) {
-      console.error('Failed to restore settings:', (error as Error).message);
+    const error = restoreProtectionsSync(pin);
+    if (error) {
+      console.error(`Failed to restore settings: ${error}`);
+      console.error('The headset is still in test mode and will not sleep.');
+      process.exit(1);
     }
+    console.log('Stay-awake off — guardian, dialogs, autosleep, proximity on');
     process.exit(0);
   };
 

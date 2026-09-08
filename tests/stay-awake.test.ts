@@ -5,6 +5,7 @@ import {
   trackUnpluggedDuration,
   shouldExitOnUnplug,
 } from '../src/commands/stay-awake.js';
+import { parseSetPropertyError } from '../src/utils/quest-protections.js';
 
 describe('parseQuestProtections', () => {
   it('parses a Bundle where every protection is off (stay-awake on)', () => {
@@ -119,5 +120,34 @@ describe('shouldExitOnUnplug', () => {
 
   it('treats negative thresholds as disabled', () => {
     expect(shouldExitOnUnplug(600000, -1)).toBe(false);
+  });
+});
+
+describe('parseSetPropertyError', () => {
+  // `adb shell content call` exits 0 whatever the provider decides; this bundle
+  // is the only place a rejected SET_PROPERTY shows up. Captured verbatim from
+  // Quest 3 2G0YC1ZF7V0HP1 on 2026-09-08, where `stay-awake --off` reported
+  // success while every protection stayed off.
+  it('extracts the message from a rejected call', () => {
+    const output =
+      'Result: Bundle[{Message=PIN verification failed: com.oculus.auth.components.HttpError: ' +
+      'com.oculus.http.core.base.ApiError: retrofit.RetrofitError: 400 - NON_NETWORK_ISSUE, Success=false}]';
+    expect(parseSetPropertyError(output)).toMatch(/^PIN verification failed/);
+  });
+
+  it('returns null for an accepted call', () => {
+    expect(parseSetPropertyError('Result: Bundle[{Success=true}]')).toBeNull();
+  });
+
+  it('returns null for output it does not recognise', () => {
+    // Better to miss a failure than invent one: callers verify with GET_PROPERTY.
+    expect(parseSetPropertyError('')).toBeNull();
+    expect(parseSetPropertyError('Result: Bundle[{}]')).toBeNull();
+  });
+
+  it('still reports a failure with no Message field', () => {
+    expect(parseSetPropertyError('Result: Bundle[{Success=false}]')).toBe(
+      'SET_PROPERTY returned Success=false',
+    );
   });
 });

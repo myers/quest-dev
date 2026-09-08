@@ -372,10 +372,22 @@ cli.command(
       // Try daemon first, fall back to direct
       const existing = await discoverDaemonForDevice(argv.device as string | undefined);
       if (existing) {
-        await daemonFetch(existing, '/stay-awake/disable', { method: 'POST' });
+        const result = await daemonFetch(existing, '/stay-awake/disable', {
+          method: 'POST',
+          body: { pin: argv.pin },
+        }) as { ok: boolean; error?: string };
+        if (!result.ok) {
+          console.error('Failed to turn stay-awake off:', result.error);
+          process.exit(1);
+        }
         console.log('Stay-awake off via daemon');
       } else {
-        await stayAwakeOff(argv.pin as string | undefined);
+        try {
+          await stayAwakeOff(argv.pin as string | undefined);
+        } catch (error) {
+          console.error('Failed to turn stay-awake off:', (error as Error).message);
+          process.exit(1);
+        }
       }
       return;
     }

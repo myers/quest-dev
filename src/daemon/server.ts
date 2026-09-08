@@ -154,9 +154,17 @@ POST endpoints (JSON body)
     }
   });
 
-  app.post("/stay-awake/disable", async () => {
-    await stayAwake.turnOff();
-    return { ok: true };
+  app.post<{ Body: { pin?: string } }>("/stay-awake/disable", async (req, reply) => {
+    // A PIN is optional here: the manager caches the one it enabled with. The
+    // body's (or the config's) is the fallback for a daemon that restarted
+    // mid-session and never saw a turnOn().
+    const pin = tryLoadPin(req.body?.pin) ?? undefined;
+    try {
+      await stayAwake.turnOff(pin);
+      return { ok: true };
+    } catch (error) {
+      return reply.code(500).send({ ok: false, error: (error as Error).message });
+    }
   });
 
   app.get("/stay-awake/status", async () => {

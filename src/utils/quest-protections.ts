@@ -14,7 +14,8 @@
  * builder boundaries.
  */
 
-import { execCommand, execCommandFull } from "./exec.js";
+import { execFileSync } from "node:child_process";
+import { execCommandFull } from "./exec.js";
 import { adbArgs } from "./adb.js";
 
 export interface QuestProtections {
@@ -81,14 +82,57 @@ export function parseQuestProtections(output: string): QuestProtections {
 }
 
 /**
+ * Pull the failure out of a SET_PROPERTY Result bundle.
+ *
+ * `adb shell content call` exits 0 whatever the provider decides, so the exit
+ * status reports success for a call that changed nothing. The provider's own
+ * answer is the only honest signal:
+ *
+ *   Bundle[{Message=PIN verification failed: ... 400 - NON_NETWORK_ISSUE, Success=false}]
+ *
+ * Returns the message when the bundle says `Success=false`, else null. Anything
+ * we don't recognise (empty output, an OS that answers differently) is treated
+ * as "not visibly a failure" — callers verify with GET_PROPERTY anyway, and a
+ * parser that invents failures is worse than one that misses them.
+ */
+export function parseSetPropertyError(output: string): string | null {
+  if (!/Success\s*=\s*false/.test(output)) return null;
+  const message = output.match(/Message=([\s\S]*?)(?:,\s*Success=|\}\])/);
+  return message?.[1].trim() || "SET_PROPERTY returned Success=false";
+}
+
+/**
  * Call SET_PROPERTY. `protectionsOn=true` restores Quest to normal.
+ * Throws when the provider rejected the call (bad PIN, PIN verification
+ * failure) — the exit code alone will not tell you.
  */
 export async function setQuestProtections(
   pin: string,
   protectionsOn: boolean,
 ): Promise<void> {
   const args = adbArgs(...buildSetPropertyArgs(pin, protectionsOn));
-  await execCommand("adb", args);
+  const { stdout, stderr, code } = await execCommandFull("adb", args);
+  if (code !== 0) {
+    throw new Error(`SET_PROPERTY failed: adb exited ${code}: ${stderr.trim()}`);
+  }
+  const error = parseSetPropertyError(stdout);
+  if (error) throw new Error(`SET_PROPERTY rejected: ${error}`);
+}
+
+/**
+ * Restore protections synchronously, for signal handlers and watchdogs that
+ * cannot await. Returns an error message, or null on an accepted call.
+ * Never throws.
+ */
+export function restoreProtectionsSync(pin: string): string | null {
+  try {
+    const out = execFileSync("adb", adbArgs(...buildSetPropertyArgs(pin, true)), {
+      encoding: "utf-8",
+    });
+    return parseSetPropertyError(out);
+  } catch (error) {
+    return (error as Error).message;
+  }
 }
 
 /**
