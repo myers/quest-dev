@@ -73,6 +73,22 @@ async function httpGet(
   };
 }
 
+/**
+ * Poll /cast/status until the decoder reports a frame. Falls through on
+ * timeout so the /cast/screenshot fetch reports the real error.
+ */
+export async function waitForFrame(info: DaemonInfo, timeoutMs = 10000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const status = (await daemonFetch(info, "/cast/status")) as {
+      has_frame?: boolean;
+    };
+    if (status?.has_frame) return;
+    if (Date.now() >= deadline) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 export async function castScreenshotCommand(
   opts: CastScreenshotOptions,
 ): Promise<void> {
@@ -96,7 +112,10 @@ export async function castScreenshotCommand(
     process.exit(1);
   }
 
-  // Give the cast session a moment to produce a frame after a cold start.
+  // A start that actually started something (cold, or a recovery of a stalled
+  // session) returns before the XRSP handshake has finished. Changing the eye
+  // mode inside that window resets the stream and the session then sits at
+  // frame_count 0 forever, so let the handshake land first.
   if (!startResp.already_running) {
     await new Promise((r) => setTimeout(r, 1500));
   }
@@ -110,8 +129,12 @@ export async function castScreenshotCommand(
     process.exit(1);
   }
 
-  // Small settle time so the mode change takes effect before we grab a frame.
+  // Small settle time so the mode change takes effect before we grab a frame,
+  // then wait for the decoder to actually have one. A cold start — or a
+  // /cast/start that just recovered a stalled session — needs a couple of
+  // seconds, and /cast/screenshot 503s until then.
   await new Promise((r) => setTimeout(r, 500));
+  await waitForFrame(info);
 
   // 3. Fetch frame.
   const { status, body, contentType } = await httpGet(info, "/cast/screenshot");
