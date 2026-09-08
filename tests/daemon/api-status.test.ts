@@ -23,7 +23,7 @@ async function apiFetch(
     // Try to parse JSON error, fall back to status text
     let msg: string;
     try {
-      const json = await r.json();
+      const json = (await r.json()) as { error?: string };
       msg = json.error ?? r.statusText;
     } catch {
       msg = r.statusText;

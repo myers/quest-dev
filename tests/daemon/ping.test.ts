@@ -34,7 +34,7 @@ describe('sendDaemonPing', () => {
       }),
     ]);
 
-    sendDaemonPing({ pid: child.pid!, port: 0, startedAt: '' });
+    sendDaemonPing({ pid: child.pid! });
 
     expect(await exited).toBe(42);
   });

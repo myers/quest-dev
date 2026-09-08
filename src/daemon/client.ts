@@ -50,7 +50,7 @@ export function discoverDaemon(serial: string): DaemonRecord | null {
  * ping`) so the daemon survives a run it would otherwise idle out of.
  * Throws if the PID is no longer alive.
  */
-export function sendDaemonPing(info: DaemonInfo): void {
+export function sendDaemonPing(info: Pick<DaemonInfo, "pid">): void {
   process.kill(info.pid, "SIGUSR1");
 }
 

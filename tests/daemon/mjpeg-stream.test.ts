@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 /**
  * MJPEG stream cleanup logic.
@@ -7,9 +7,9 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
  */
 
 interface FakeResponse {
-  writeHead: ReturnType<typeof vi.fn>;
-  write: ReturnType<typeof vi.fn>;
-  end: ReturnType<typeof vi.fn>;
+  writeHead: Mock<(status: number, headers?: Record<string, string>) => void>;
+  write: Mock<(chunk: string | Buffer) => void>;
+  end: Mock<() => void>;
   ended: boolean;
 }
 
