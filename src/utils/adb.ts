@@ -289,6 +289,45 @@ export async function resolveCdpPort(
 }
 
 /**
+ * Point `tcp:<cdpPort>` at `localabstract:<cdpSocket>`, idempotently.
+ *
+ * The port is normally already listening, because adb itself listens on every
+ * port it forwards -- and `resolveCdpPort()` deliberately reuses this device's
+ * existing forward. So "port in use" only means "somebody else's process" when
+ * no adb forward owns it; when the owner is a stale forward of ours (the socket
+ * name carries the browser's old pid, which changes on every restart), the fix
+ * is to re-point it, not to refuse to run. Refusing left `quest-dev open`
+ * exiting 1 with "Port 9249 is already in use by another process" after any
+ * browser restart, which reads as a host-side port conflict and is not one.
+ */
+async function ensureCdpForward(cdpSocket: string, cdpPort: number): Promise<void> {
+  const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
+  if (forwardList.includes(`tcp:${cdpPort} localabstract:${cdpSocket}`)) {
+    console.log(`CDP port ${cdpPort} forwarding already set up`);
+    return;
+  }
+
+  const staleOurs = new RegExp(`tcp:${cdpPort}\\s+localabstract:\\S*devtools_remote`).test(forwardList);
+  if (staleOurs) {
+    verbose('ensureCdpForward: re-pointing stale forward on port', cdpPort, 'at', cdpSocket);
+    await execCommandFull('adb', adbArgs('forward', '--remove', `tcp:${cdpPort}`));
+  } else if (await isPortListening(cdpPort)) {
+    console.error(`Error: Port ${cdpPort} is already in use by another process`);
+    console.error('');
+    console.error(`CDP port forwarding requires port ${cdpPort} to be free.`);
+    console.error('Please stop the process using this port and try again.');
+    console.error('');
+    console.error('To find what is using the port:');
+    console.error(`  lsof -i :${cdpPort}`);
+    console.error('');
+    process.exit(1);
+  }
+
+  await execCommand('adb', adbArgs('forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`));
+  console.log(`ADB forward port forwarding set up: Host:${cdpPort} -> Quest:${cdpSocket} (CDP)`);
+}
+
+/**
  * Idempotently set up ADB port forwarding for a given port
  */
 export async function ensurePortForwarding(
@@ -312,31 +351,7 @@ export async function ensurePortForwarding(
       console.log(`ADB reverse port forwarding set up: Quest:${port} -> Host:${port}`);
     }
 
-    // Check forward forwarding (Host -> Quest for CDP)
-    // First check if ADB already has this forwarding set up
-    const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
-    const forwardExists = forwardList.includes(`tcp:${cdpPort}`) && forwardList.includes(cdpSocket);
-
-    if (forwardExists) {
-      console.log(`CDP port ${cdpPort} forwarding already set up`);
-    } else {
-      // Check if something else is using the port
-      const cdpPortListening = await isPortListening(cdpPort);
-      if (cdpPortListening) {
-        console.error(`Error: Port ${cdpPort} is already in use by another process`);
-        console.error('');
-        console.error(`CDP port forwarding requires port ${cdpPort} to be free.`);
-        console.error('Please stop the process using this port and try again.');
-        console.error('');
-        console.error('To find what is using the port:');
-        console.error(`  lsof -i :${cdpPort}`);
-        console.error('');
-        process.exit(1);
-      }
-
-      await execCommand('adb', adbArgs('forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`));
-      console.log(`ADB forward port forwarding set up: Host:${cdpPort} -> Quest:${cdpSocket} (CDP)`);
-    }
+    await ensureCdpForward(cdpSocket, cdpPort);
   } catch (error) {
     console.error('Failed to set up port forwarding:', (error as Error).message);
     process.exit(1);
@@ -406,30 +421,7 @@ export async function ensureCDPForwarding(
     const cdpSocket = await detectCDPSocket(browser);
     const cdpPort = cdpPortOverride ?? getCDPPortForSocket(cdpSocket);
 
-    // Check forward forwarding (Host -> Quest for CDP)
-    const forwardList = await execCommand('adb', adbArgs('forward', '--list'));
-    const forwardExists = forwardList.includes(`tcp:${cdpPort}`) && forwardList.includes(cdpSocket);
-
-    if (forwardExists) {
-      console.log(`CDP port ${cdpPort} forwarding already set up`);
-    } else {
-      // Check if something else is using the port
-      const cdpPortListening = await isPortListening(cdpPort);
-      if (cdpPortListening) {
-        console.error(`Error: Port ${cdpPort} is already in use by another process`);
-        console.error('');
-        console.error(`CDP port forwarding requires port ${cdpPort} to be free.`);
-        console.error('Please stop the process using this port and try again.');
-        console.error('');
-        console.error('To find what is using the port:');
-        console.error(`  lsof -i :${cdpPort}`);
-        console.error('');
-        process.exit(1);
-      }
-
-      await execCommand('adb', adbArgs('forward', `tcp:${cdpPort}`, `localabstract:${cdpSocket}`));
-      console.log(`ADB forward port forwarding set up: Host:${cdpPort} -> Quest:${cdpSocket} (CDP)`);
-    }
+    await ensureCdpForward(cdpSocket, cdpPort);
   } catch (error) {
     console.error('Failed to set up CDP forwarding:', (error as Error).message);
     process.exit(1);
