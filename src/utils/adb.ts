@@ -421,15 +421,20 @@ export async function launchBrowser(url: string, browser: string = 'com.oculus.b
 }
 
 /**
- * Get CDP port
+ * Get CDP port.
+ *
+ * The port never depended on the socket -- getCDPPortForSocket() ignores its
+ * argument and always answers CDP_PORT -- so the detectCDPSocket() call this
+ * used to make was a multi-second adb round trip (pidof plus up to five
+ * `cat /proc/net/unix` retries) whose result was discarded. It also made
+ * tests/adb.test.ts depend on a live device and time out under host load
+ * (iss quest-dev-getcdpport-test-not-hermetic).
  */
 export async function getCDPPort(
-  browser: string = 'com.oculus.browser',
+  _browser: string = 'com.oculus.browser',
   cdpPortOverride?: number
 ): Promise<number> {
-  if (cdpPortOverride !== undefined) return cdpPortOverride;
-  const cdpSocket = await detectCDPSocket(browser);
-  return getCDPPortForSocket(cdpSocket);
+  return cdpPortOverride ?? CDP_PORT;
 }
 
 /**

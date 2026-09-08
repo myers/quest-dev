@@ -29,9 +29,15 @@ describe('isPortListening', () => {
 });
 
 describe('getCDPPort', () => {
+  // Hermetic on purpose (iss quest-dev-getcdpport-test-not-hermetic): the port
+  // is a constant, so getCDPPort must not shell out to adb to produce it.
   it('should return the default CDP port', async () => {
     const port = await getCDPPort();
     expect(port).toBe(9223);
+  });
+
+  it('returns the override when one is given', async () => {
+    expect(await getCDPPort('net.monoloco.chromium', 9249)).toBe(9249);
   });
 });
 
