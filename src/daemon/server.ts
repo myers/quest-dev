@@ -111,6 +111,8 @@ POST endpoints (JSON body)
       version: getPackageVersion(),
       uptime: Math.round(process.uptime()),
       pid: process.pid,
+      // Cached daemon flag, no adb round-trip. Can be stale — /stay-awake/status
+      // reads the device.
       stay_awake: stayAwake.isEnabled,
       cast: { active: castManager.isActive },
       logcat: {
@@ -155,9 +157,13 @@ POST endpoints (JSON body)
   });
 
   app.get("/stay-awake/status", async () => {
+    // `enabled` is derived from the device's own GET_PROPERTY, not from the
+    // daemon's in-memory flag, which goes stale whenever anything else
+    // touches com.oculus.rc. `properties` is positive-form: all four false
+    // means every protection is off, i.e. stay-awake is ON.
     const props = await stayAwake.status();
     return {
-      enabled: stayAwake.isEnabled,
+      enabled: !props.guardian && !props.dialogs && !props.autosleep && !props.proximityClose,
       properties: props,
     };
   });
