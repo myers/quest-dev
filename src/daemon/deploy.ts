@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { execCommand, execCommandFull } from "../utils/exec.js";
 import type { ExecResult } from "../utils/exec.js";
 import { verbose } from "../utils/verbose.js";
-import { adbArgs, ensureAdbHealthy } from "../utils/adb.js";
+import { adbArgs, ensureAdbHealthy, waitForPanelComposited } from "../utils/adb.js";
 import {
   resolvePortConflicts,
   type AdbCommandRunner,
@@ -458,6 +458,22 @@ export async function deploy(
       logcatLines: tail,
       logcatFile,
       error: `Process not running (pidof exit=${psResult.code}, stdout="${pid}", stderr="${psResult.stderr.trim()}")`,
+    });
+    return;
+  }
+
+  // A panel the VR shell backgrounded is not a crash and its process stays
+  // alive, so everything above passes while nothing is composited -- and for a
+  // Bevy panel that reads as "BRP stopped responding", not as a failed deploy.
+  const composited = await waitForPanelComposited(packageName);
+  if (!composited.ok) {
+    onEvent({
+      type: 'done',
+      ok: false,
+      package: packageName,
+      crashed: false,
+      logcatFile,
+      error: composited.error,
     });
     return;
   }

@@ -12,7 +12,8 @@ import {
   isBrowserRunning,
   launchBrowser,
   getCDPPort,
-  resolveCdpPort
+  resolveCdpPort,
+  waitForPanelComposited
 } from '../utils/adb.js';
 import { execCommand, execCommandFull } from '../utils/exec.js';
 
@@ -211,6 +212,17 @@ export async function openCommand(
       console.log('No existing or blank tab found, opening URL...');
       await launchBrowser(url, browser);
     }
+  }
+
+  // The Quest shell can background a freshly created panel when guardian/HMD
+  // state is unsettled, and it never brings it back: the activity never becomes
+  // visible, Chrome's deferred startup never runs, and `chrome_devtools_remote`
+  // is never bound -- so every cdp-cli call downstream dies with `fetch failed`
+  // while this command has already printed "Done!". Verify and relaunch.
+  const composited = await waitForPanelComposited(browser);
+  if (!composited.ok) {
+    console.error(`\nError: ${composited.error}\n`);
+    process.exit(1);
   }
 
   // Re-detect CDP socket now that browser is running.

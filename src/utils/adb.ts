@@ -653,3 +653,123 @@ export async function ensureAdbHealthy(events?: AdbHealthEvents): Promise<AdbHea
   events?.onFailed?.(message);
   return { kind: 'failed', error: message };
 }
+
+/**
+ * What the VR shell is doing with an app's panel, read off its activity task.
+ *
+ * A panel is composited only when BOTH flags are true; measured on a Quest 3
+ * (2G0YC1ZF7V0HP1), the failures differ:
+ *
+ *   visible=true  visibleRequested=true   composited
+ *   visible=false visibleRequested=false  the shell backgrounded the panel
+ *                                         ("is now backgrounded due to: guardian",
+ *                                         "hmdDismount", "egoCentricDesktopBackground"),
+ *                                         or the display went to sleep under it
+ *   visible=true  visibleRequested=false  launched onto a sleeping display -- the
+ *                                         shell created no panel at all, yet the
+ *                                         task still reads visible=true, and Chrome
+ *                                         still binds its devtools socket. So
+ *                                         "socket exists" is NOT a liveness proof.
+ *
+ * A backgrounded panel never returns to the foreground on its own, so the
+ * activity never becomes visible and nothing that waits on first draw ever runs
+ * (Chrome's devtools socket, a Bevy panel's BRP server).
+ *
+ * Which of the two failures it is comes from `dumpsys power`, not from these
+ * flags: both signatures above have been observed with the display asleep.
+ */
+export type PanelState = 'composited' | 'not-composited' | 'no-task';
+
+/** Pure parser over `dumpsys activity activities` output. Exported for tests. */
+export function parsePanelState(dumpsys: string, packageName: string): PanelState {
+  const task = dumpsys
+    .split('\n')
+    .find(l => l.includes(`:${packageName} `) && l.includes('visible='));
+  if (!task) return 'no-task';
+  return /\bvisible=true\b/.test(task) && /\bvisibleRequested=true\b/.test(task)
+    ? 'composited'
+    : 'not-composited';
+}
+
+async function panelState(packageName: string): Promise<PanelState> {
+  const result = await execCommandFull('adb', adbArgs('shell', 'dumpsys', 'activity', 'activities'));
+  return parsePanelState(result.stdout, packageName);
+}
+
+async function isDisplayAsleep(): Promise<boolean> {
+  const result = await execCommandFull('adb', adbArgs('shell', 'dumpsys', 'power'));
+  return result.stdout.includes('mWakefulness=Asleep');
+}
+
+/** Pure parser for the VR shell's own reason string. Exported for tests.
+ * Lines look like:
+ *   I [SEO] PanelAppHost: Panel (panelId:36) (<pkg>/<activity>) is now backgrounded due to: guardian
+ * The reason is a family, not one value -- `guardian`, `hmdDismount` and
+ * `egoCentricDesktopBackground` have all been seen on the same panel. */
+export function parseBackgroundReason(logcat: string, packageName: string): string | null {
+  const hits = logcat
+    .split('\n')
+    .filter(l => l.includes('backgrounded due to') && l.includes(packageName));
+  const last = hits[hits.length - 1];
+  return last ? last.replace(/^.*backgrounded due to:\s*/, '').trim() : null;
+}
+
+/** The VR shell's own reason for backgrounding this package's panel, if it logged one. */
+async function panelBackgroundReason(packageName: string): Promise<string | null> {
+  try {
+    const result = await execCommandFull('adb', adbArgs('logcat', '-d', '-b', 'main', '-t', '2000'));
+    return parseBackgroundReason(result.stdout, packageName);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wait for the VR shell to actually composite the app's panel, relaunching when
+ * it does not. Without this every launch path reports success on a panel the
+ * shell backgrounded: `open` prints "Done!" with no CDP behind it, and `deploy`
+ * passes its crash check because a backgrounded panel is not a crash.
+ *
+ * Returns `{ ok: false, error }` rather than exiting, so `deploy` can put the
+ * reason in its own `done` event.
+ */
+export async function waitForPanelComposited(
+  packageName: string,
+  opts: { tries?: number; timeoutMs?: number; pollMs?: number } = {}
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tries = opts.tries ?? 3;
+  const timeoutMs = opts.timeoutMs ?? 20000;
+  const pollMs = opts.pollMs ?? 2000;
+
+  let state: PanelState = 'no-task';
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      state = await panelState(packageName);
+      verbose('waitForPanelComposited:', packageName, state, `(attempt ${attempt}/${tries})`);
+      if (state === 'composited') return { ok: true };
+      await new Promise(r => setTimeout(r, pollMs));
+    } while (Date.now() < deadline);
+
+    // Relaunching cannot wake a sleeping display, so don't burn three attempts on it.
+    if (await isDisplayAsleep()) break;
+    if (attempt < tries) {
+      console.log(`Panel not composited (${state}); relaunching ${packageName} (${attempt}/${tries - 1})`);
+      await execCommandFull('adb', adbArgs(
+        'shell', 'monkey', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1',
+      ));
+    }
+  }
+
+  if (await isDisplayAsleep()) {
+    return { ok: false, error:
+      `${packageName} launched but the Quest display is asleep, so the VR shell is not ` +
+      `compositing its panel. Nothing that waits on first draw will run. Fix: quest-dev stay-awake` };
+  }
+  const reason = await panelBackgroundReason(packageName);
+  return { ok: false, error:
+    `${packageName} launched but the VR shell is not compositing its panel (task ${state}` +
+    `${reason ? `, backgrounded due to: ${reason}` : ''}) after ${tries} launches. ` +
+    `A 'guardian' or 'hmdDismount' reason means the headset is not in test mode: quest-dev deploy <apk>. ` +
+    `See: quest-dev logcat tail | grep 'backgrounded due to'` };
+}

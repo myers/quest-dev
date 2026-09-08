@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPortListening, getCDPPort, firstFreePort, cdpForwardPort, resolveCdpPort } from '../src/utils/adb.js';
+import { isPortListening, getCDPPort, firstFreePort, cdpForwardPort, resolveCdpPort, parsePanelState, parseBackgroundReason } from '../src/utils/adb.js';
 import { cdpPortForSerial } from '../src/utils/device-id.js';
 import net from 'net';
 
@@ -96,5 +96,54 @@ describe('resolveCdpPort', () => {
       async () => { throw new Error('adb: device offline'); },
     );
     expect(port).toBe(cdpPortForSerial('2G0YC1ZF7V0HP1'));
+  });
+});
+
+describe('parsePanelState', () => {
+  // Real `dumpsys activity activities` task lines from a Quest 3 (2G0YC1ZF7V0HP1).
+  const task = (flags: string) =>
+    `    * Task{7a80656 #19817 type=standard A=10064:net.monoloco.chromium U=0 rootTaskId=19816 ${flags} mode=multi-window translucent=false sz=1}`;
+
+  it('reads a composited panel', () => {
+    expect(parsePanelState(task('visible=true visibleRequested=true'), 'net.monoloco.chromium'))
+      .toBe('composited');
+  });
+
+  it('reads a panel the VR shell backgrounded', () => {
+    expect(parsePanelState(task('visible=false visibleRequested=false'), 'net.monoloco.chromium'))
+      .toBe('not-composited');
+  });
+
+  // The trap: launched onto a sleeping display, no panel ever created, yet
+  // visible=true. Half-reading the line calls this composited.
+  it('does not call a sleeping display composited', () => {
+    expect(parsePanelState(task('visible=true visibleRequested=false'), 'net.monoloco.chromium'))
+      .toBe('not-composited');
+  });
+
+  it('reports no-task when the package has no activity task', () => {
+    expect(parsePanelState(task('visible=true visibleRequested=true'), 'com.oculus.browser'))
+      .toBe('no-task');
+  });
+});
+
+describe('parseBackgroundReason', () => {
+  // Verbatim lines from ~/.local/state/quest-dev/logcat/2G0YC1ZF7V0HP1/.
+  const log = [
+    '09-07 16:31:08.030  2903  3215 I [SEO] PanelAppHost: Panel (panelId:36) (net.monoloco.chromium/org.chromium.chrome.browser.ChromeTabbedActivity) is now backgrounded due to: guardian',
+    '09-08 11:45:14.492  2903  3215 I [SEO] PanelAppHost: Panel app (panelId:300) (net.monoloco.chromium/org.chromium.chrome.browser.ChromeTabbedActivity) changing state from startup to foreground',
+    '09-08 11:45:23.672  2903  3215 I [SEO] PanelAppHost: Panel (panelId:300) (net.monoloco.chromium/org.chromium.chrome.browser.ChromeTabbedActivity) is now backgrounded due to: egoCentricDesktopBackground',
+  ].join('\n');
+
+  it('returns the most recent reason for the package', () => {
+    expect(parseBackgroundReason(log, 'net.monoloco.chromium')).toBe('egoCentricDesktopBackground');
+  });
+
+  it('ignores other packages', () => {
+    expect(parseBackgroundReason(log, 'com.oculus.browser')).toBeNull();
+  });
+
+  it('returns null when the shell logged no reason', () => {
+    expect(parseBackgroundReason('', 'net.monoloco.chromium')).toBeNull();
   });
 });
