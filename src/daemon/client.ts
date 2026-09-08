@@ -48,10 +48,22 @@ export function discoverDaemon(serial: string): DaemonRecord | null {
  * Mark the daemon active by sending it SIGUSR1, which its handler routes
  * to resetIdleTimer(). Long-running sessions call this (via `quest-dev
  * ping`) so the daemon survives a run it would otherwise idle out of.
- * Throws if the PID is no longer alive.
+ *
+ * Returns "sent" when the signal was delivered, and "gone" when the PID no
+ * longer exists (ESRCH) — a registry record whose daemon exited after the
+ * caller's liveness check is an ordinary race, not a fault, so it is a return
+ * value rather than a throw. Nothing else is caught: EPERM cannot reach here
+ * through discoverDaemon(), whose isPidAlive() already treats an unsignalable
+ * PID as dead.
  */
-export function sendDaemonPing(info: Pick<DaemonInfo, "pid">): void {
-  process.kill(info.pid, "SIGUSR1");
+export function sendDaemonPing(info: Pick<DaemonInfo, "pid">): "sent" | "gone" {
+  try {
+    process.kill(info.pid, "SIGUSR1");
+    return "sent";
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ESRCH") return "gone";
+    throw err;
+  }
 }
 
 /**

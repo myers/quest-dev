@@ -38,4 +38,18 @@ describe('sendDaemonPing', () => {
 
     expect(await exited).toBe(42);
   });
+
+  // The race this covers: discoverDaemon()'s isPidAlive() passes, then the
+  // daemon idles out / hits low battery / is stopped before the signal lands.
+  // ESRCH is an ordinary outcome there, not a crash (quest-dev-ping-esrch-stack-trace).
+  it('reports a dead PID as "gone" instead of throwing ESRCH', { timeout: 15000 }, async () => {
+    const child = spawn(process.execPath, ['-e', 'console.log("ready")'], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const exited = new Promise<number>((res) => child.on('exit', (c) => res(c ?? -1)));
+    await once(child.stdout!, 'data');
+    expect(await exited).toBe(0);
+
+    expect(sendDaemonPing({ pid: child.pid! })).toBe('gone');
+  });
 });

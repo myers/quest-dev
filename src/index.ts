@@ -621,7 +621,17 @@ cli.command(
       process.exitCode = 1;
       return;
     }
-    sendDaemonPing(info);
+    if (sendDaemonPing(info) === 'gone') {
+      // The record was live at discovery and its PID is gone now: all we know
+      // is that the registry entry is stale. Don't guess why it died — the
+      // next command's discoverDaemon() sweeps the record.
+      console.error(
+        `No quest-dev daemon to ping: the registry entry for ${info.serial} names PID ${info.pid}, ` +
+          `which is no longer running. The entry is stale; run \`quest-dev start\` to start a daemon.`
+      );
+      process.exitCode = 1;
+      return;
+    }
     console.log(`Pinged daemon (PID ${info.pid}) — idle timer reset.`);
   }
 );
