@@ -11,7 +11,7 @@
     "clean": "rm -rf build",
     "build": "pnpm -r run build && pnpm run clean && tsc && mkdir -p build/public && cp src/public/index.html src/public/style.css build/public/ && npx esbuild src/public/dashboard.js --bundle --format=iife --outfile=build/public/dashboard.js && chmod +x build/index.js",
     "start": "pnpm run build && node build/index.js",
-    "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json && tsc -p packages/cast2-protocol/tsconfig.test.json",
     "test": "pnpm run typecheck && vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
