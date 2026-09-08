@@ -2,9 +2,16 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { parseIncrementalProgress, type ProgressUpdate, collectDeployEvents, deploy, type DeployEvent } from '../../src/daemon/deploy.js';
 import { vi } from 'vitest';
 import * as adbModuleNs from '../../src/utils/adb.js';
+import * as exec from '../../src/utils/exec.js';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// deploy() routes its plain `adb <args>` calls through the injected runner,
+// but the install and the pidof probe need an exit code and go through
+// execCommandFull. Stub the module so no test in this file shells out to a
+// real adb (same pattern as tests/adb-health.test.ts).
+vi.mock('../../src/utils/exec.js');
 
 describe('parseIncrementalProgress', () => {
   it('emits one update per ~10% of total, plus a final transferred update', () => {
@@ -228,6 +235,14 @@ describe('deploy() event sequence', () => {
     const fakeApk = join(tmpdir(), `port-conflict-test-${process.pid}.apk`);
     writeFileSync(fakeApk, 'not-a-real-apk');
 
+    // Installing a 14-byte "APK" fails on a real device; make that hermetic
+    // so deploy() bails on its own error path instead of waiting on adb.
+    vi.mocked(exec).execCommandFull.mockResolvedValue({
+      stdout: '',
+      stderr: 'Failure [INSTALL_PARSE_FAILED_NOT_APK]',
+      code: 1,
+    });
+
     const forceStopped: string[] = [];
     const adb = vi.fn(async (args: string[]) => {
       if (args.includes('cat') && args.includes('/proc/net/tcp')) {
@@ -274,6 +289,8 @@ describe('deploy() event sequence', () => {
         { packageName: 'com.bevychromium', uid: 10183 },
       ]);
     }
-    expect(forceStopped).toEqual(['com.bevychromium']);
+    // The orphan is stopped by the conflict scan; the target package by
+    // deploy's own force-stop -- both through the injected runner.
+    expect(forceStopped).toEqual(['com.bevychromium', 'net.monoloco.keyboarddemo']);
   });
 });

@@ -32,10 +32,11 @@ export interface DeployOptions {
   crashWaitMs?: number;
   onEvent: (event: DeployEvent) => void;
   /**
-   * Adb command runner. When supplied, deploy() uses it to scan for and
-   * force-stop orphan apps holding the debugging port before install.
-   * Tests inject a mock; production wires the real `adb` binary via
-   * adbArgs().
+   * Adb command runner for every plain `adb <args>` call deploy() makes —
+   * the debugging-port conflict scan, the force-stop, and the launch.
+   * Defaults to the real `adb` binary via adbArgs(); tests inject a mock.
+   * (Install and the pidof probe need an exit code, so they still go
+   * through execCommandFull directly.)
    */
   adb?: AdbCommandRunner;
   /**
@@ -226,7 +227,13 @@ export async function deploy(
   stayAwake: StayAwakeManager,
   logcat: LogcatManager,
 ): Promise<void> {
-  const { apkPath, crashWaitMs = 5000, pin, onEvent } = options;
+  const {
+    apkPath,
+    crashWaitMs = 5000,
+    pin,
+    onEvent,
+    adb = (args: string[]) => execCommand("adb", adbArgs(...args)),
+  } = options;
   const absPath = resolve(apkPath);
 
   // Health-check ADB before doing anything. If the device is wedged, no
@@ -310,31 +317,29 @@ export async function deploy(
   // debugging port (e.g. Bevy BRP 15702), so the freshly-deployed app
   // silently fails to rebind and clients end up waiting on the orphan's
   // possibly-suspended state.
-  if (options.adb) {
-    const debuggingPort = options.debuggingPort ?? DEFAULT_DEBUGGING_PORT;
-    try {
-      const report = await resolvePortConflicts({
+  const debuggingPort = options.debuggingPort ?? DEFAULT_DEBUGGING_PORT;
+  try {
+    const report = await resolvePortConflicts({
+      port: debuggingPort,
+      targetPackage: packageName,
+      adb,
+    });
+    if (report.stopped.length > 0 || report.skipped.length > 0) {
+      onEvent({
+        type: 'port_conflict_resolved',
         port: debuggingPort,
-        targetPackage: packageName,
-        adb: options.adb,
+        stopped: report.stopped,
+        skipped: report.skipped,
       });
-      if (report.stopped.length > 0 || report.skipped.length > 0) {
-        onEvent({
-          type: 'port_conflict_resolved',
-          port: debuggingPort,
-          stopped: report.stopped,
-          skipped: report.skipped,
-        });
-      }
-    } catch (error) {
-      // Non-fatal: log via verbose, continue with the deploy.
-      verbose(`port-conflict scan failed: ${(error as Error).message}`);
     }
+  } catch (error) {
+    // Non-fatal: log via verbose, continue with the deploy.
+    verbose(`port-conflict scan failed: ${(error as Error).message}`);
   }
 
   // Force-stop existing app
   try {
-    await execCommand("adb", adbArgs("shell", "am", "force-stop", packageName));
+    await adb(["shell", "am", "force-stop", packageName]);
     verbose(`Force-stopped ${packageName}`);
   } catch {
     // App might not be running
@@ -392,7 +397,7 @@ export async function deploy(
   onEvent({ type: 'launching' });
   try {
     // Try to launch via monkey (works for any app with a launcher activity)
-    await execCommand("adb", adbArgs(
+    await adb([
       "shell",
       "monkey",
       "-p",
@@ -400,7 +405,7 @@ export async function deploy(
       "-c",
       "android.intent.category.LAUNCHER",
       "1",
-    ));
+    ]);
     verbose(`Launched ${packageName}`);
   } catch (error) {
     onEvent({

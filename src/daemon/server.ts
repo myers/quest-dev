@@ -231,7 +231,6 @@ POST endpoints (JSON body)
             pin,
             crashWaitMs: crash_wait_ms,
             onEvent: writeEvent,
-            adb: (args) => execCommand("adb", adbArgs(...args)),
             debuggingPort: debugging_port,
           },
           stayAwake,
