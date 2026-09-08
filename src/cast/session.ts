@@ -201,44 +201,22 @@ export class CastSession extends EventEmitter {
     this.decoder.stop();
     this.controlSocket?.destroy();
     this.videoSocket?.destroy();
-    this.server?.close();
-    this._connected = false;
-    this.emit("disconnected");
-  }
 
-  async restart(): Promise<void> {
-    verbose("Restarting cast session...");
-    await this.stop();
-
-    // Reset protocol state
-    this.sessionUuid = randomUUID();
-    this.sessionTimestamp = String(Date.now());
-    this.subMagic = null;
-    this.controlMsgSeq = 0;
-    this.controlSeq = 0;
-    this._frameCount = 0;
-    this._byteCount = 0;
-    this.currentSpsPps = null;
-    this.currentIdr = null;
-    this._pose = createPoseState();
-    this.inputForwardingStarted = false;
-    this._layerAutoSelected = false;
-    this._layers.clear();
-
-    await new Promise((r) => setTimeout(r, 1000));
-
-    // Re-bind the TCP server (stop() closed it)
-    if (this.server) {
-      await new Promise<void>((resolve, reject) => {
-        this.server!.listen(this._listenPort, "0.0.0.0", () => resolve());
-        this.server!.once("error", reject);
-      });
-      verbose(`TCP server re-listening on port ${this._listenPort}`);
-    } else {
-      await this.bind();
+    // Wait for the listen socket to actually release the port, so the next
+    // session binds the same port instead of drifting to +1. Raced against a
+    // timeout because close() only calls back once every accepted connection
+    // is gone, and the Quest occasionally leaves a third one behind.
+    const server = this.server;
+    this.server = null;
+    if (server) {
+      await Promise.race([
+        new Promise<void>((resolve) => server.close(() => resolve())),
+        new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+      ]);
     }
 
-    await this.start();
+    this._connected = false;
+    this.emit("disconnected");
   }
 
   // --- ADB Setup ---

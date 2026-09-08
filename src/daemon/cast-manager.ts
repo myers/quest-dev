@@ -46,7 +46,12 @@ export class CastManager extends EventEmitter {
   }
 
   get isActive(): boolean {
-    return this.session !== null && this.session.connected;
+    // A stalled session is still `connected` but no longer `running` — its
+    // video socket hit EOF and it serves its last frame forever. Reporting it
+    // as active made /cast/start short-circuit on a dead pipe, so callers kept
+    // getting the same frozen frame. Treat it as inactive: /cast/start then
+    // takes the full (re)start path and recovers it.
+    return this.session !== null && this.session.connected && this.session.running;
   }
 
   getSession(): CastSession | null {
@@ -85,8 +90,8 @@ export class CastManager extends EventEmitter {
   }
 
   async start(opts: CastStartOptions = {}): Promise<void> {
-    if (this.session?.connected) {
-      return; // Already active
+    if (this.isActive) {
+      return; // Already active — a stalled session is not active, see isActive.
     }
     if (this.starting) {
       throw new Error("Cast start already in progress");
@@ -160,13 +165,19 @@ export class CastManager extends EventEmitter {
     this.broadcastStatus();
   }
 
+  /**
+   * Tear the session down and start a fresh one. The old in-place
+   * `CastSession.restart()` re-bound the TCP server but never re-ran
+   * `adbSetup()` / `startCastService()`, so the Quest was never told to
+   * reconnect and every restart timed out at 0/2 connections — leaving the
+   * daemon strictly worse off than the stall it was trying to fix. Going
+   * through `start()` is the same path a fresh `quest-dev start` takes, which
+   * recovers first try.
+   */
   async restart(): Promise<void> {
-    if (!this.session) {
-      await this.start();
-      return;
-    }
     this.broadcastToast("Restarting cast\u2026");
-    await this.session.restart();
+    await this.stopSession();
+    await this.start();
   }
 
   private async stopSession(): Promise<void> {
