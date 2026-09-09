@@ -87,6 +87,25 @@ describe('StayAwakeManager.turnOff', () => {
     expect(setQuestProtections).toHaveBeenCalledWith('1234', true);
   });
 
+  it('reuses the PIN it enabled with when none is passed', async () => {
+    getQuestProtections.mockResolvedValue(allOff);
+    const m = new StayAwakeManager();
+    await m.turnOn('1111');
+    expect(m.hasPin).toBe(true);
+    getQuestProtections.mockResolvedValue(allOn);
+    await m.turnOff();
+    expect(setQuestProtections).toHaveBeenLastCalledWith('1111', true);
+  });
+
+  it('prefers an explicit PIN over the cached one', async () => {
+    getQuestProtections.mockResolvedValue(allOff);
+    const m = new StayAwakeManager();
+    await m.turnOn('1111');
+    getQuestProtections.mockResolvedValue(allOn);
+    await m.turnOff('2222');
+    expect(setQuestProtections).toHaveBeenLastCalledWith('2222', true);
+  });
+
   it('throws rather than no-oping when no PIN is known', async () => {
     const m = new StayAwakeManager();
     await expect(m.turnOff()).rejects.toThrow(/No PIN known/);

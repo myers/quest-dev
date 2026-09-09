@@ -155,10 +155,12 @@ POST endpoints (JSON body)
   });
 
   app.post<{ Body: { pin?: string } }>("/stay-awake/disable", async (req, reply) => {
-    // A PIN is optional here: the manager caches the one it enabled with. The
-    // body's (or the config's) is the fallback for a daemon that restarted
-    // mid-session and never saw a turnOn().
-    const pin = tryLoadPin(req.body?.pin) ?? undefined;
+    // Precedence: an explicit body PIN, then the PIN the manager enabled with,
+    // then the config. The config is only consulted when the manager has no
+    // PIN cached (a daemon that restarted mid-session and never saw turnOn()),
+    // so a --pin override used at turnOn() is not clobbered by config.pin.
+    const pin =
+      req.body?.pin ?? (stayAwake.hasPin ? undefined : tryLoadPin() ?? undefined);
     try {
       await stayAwake.turnOff(pin);
       return { ok: true };

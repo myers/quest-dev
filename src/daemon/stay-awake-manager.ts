@@ -33,6 +33,11 @@ export class StayAwakeManager {
     return this.active;
   }
 
+  /** Whether a PIN is cached from an earlier turnOn()/turnOff() */
+  get hasPin(): boolean {
+    return this.pin !== undefined;
+  }
+
   /**
    * Turn stay-awake on (turn Quest protections off).
    *
