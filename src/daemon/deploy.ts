@@ -107,7 +107,7 @@ async function extractPackageName(apkPath: string): Promise<string> {
   }
 
   throw new Error(
-    "Cannot extract package name from APK. Install aapt2 (part of Android build-tools).",
+    "Cannot extract package name from APK: aapt2 failed or is not on the daemon's PATH. Run `quest-dev stop` and retry from a shell with Android build-tools on PATH (or ANDROID_HOME set).",
   );
 }
 

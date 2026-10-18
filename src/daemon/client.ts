@@ -13,6 +13,7 @@ import { resolveDevice as resolveDeviceFull } from "./resolve.js";
 import { loadConfig } from "../utils/config.js";
 import { verbose } from "../utils/verbose.js";
 import { getBuildId } from "../utils/version.js";
+import { daemonPath } from "./tools.js";
 
 /**
  * Connection info the rest of the CLI consumes. The per-serial registry record
@@ -124,6 +125,7 @@ async function spawnDaemon(opts: SpawnDaemonOptions): Promise<DaemonRecord> {
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: "ignore",
+    env: { ...process.env, PATH: daemonPath() },
   });
 
   // Detect an immediate crash (bad args, bind failure, throw before
