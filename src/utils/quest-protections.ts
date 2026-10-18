@@ -49,6 +49,21 @@ export function buildSetPropertyArgs(pin: string, protectionsOn: boolean): strin
 }
 
 /**
+ * Hand the proximity sensor back to the hardware after a restore.
+ *
+ * Restoring `set_proximity_close=false` does not do that on Horizon OS:
+ * `oculus.platform` answers it by broadcasting `prox_far` with a ~21-day
+ * duration, which takes a FORCE_UNMOUNTED lock in VrPowerManagerService.
+ * The headset then reads "not worn" whatever the sensor says: black screen
+ * on power-on, back to sleep after ~15 s (observed on a Quest 3,
+ * 2026-10-18, `dumpsys vrpowermanager`). `automation_disable` sets the
+ * virtual proximity state to DISABLED and releases the lock.
+ */
+export const AUTOMATION_DISABLE_ARGS = [
+  "shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_disable",
+];
+
+/**
  * Parse GET_PROPERTY Bundle output into structured data.
  * Input wire format: "Bundle[{disable_guardian=true, set_proximity_close=true, ...}]"
  * Output is positive-form: a `disable_*=true` field maps to a positive flag of `false`.
@@ -117,6 +132,12 @@ export async function setQuestProtections(
   }
   const error = parseSetPropertyError(stdout);
   if (error) throw new Error(`SET_PROPERTY rejected: ${error}`);
+  if (protectionsOn) {
+    const r = await execCommandFull("adb", adbArgs(...AUTOMATION_DISABLE_ARGS));
+    if (r.code !== 0) {
+      throw new Error(`automation_disable failed: adb exited ${r.code}: ${r.stderr.trim()}`);
+    }
+  }
 }
 
 /**
@@ -129,7 +150,10 @@ export function restoreProtectionsSync(pin: string): string | null {
     const out = execFileSync("adb", adbArgs(...buildSetPropertyArgs(pin, true)), {
       encoding: "utf-8",
     });
-    return parseSetPropertyError(out);
+    const error = parseSetPropertyError(out);
+    if (error) return error;
+    execFileSync("adb", adbArgs(...AUTOMATION_DISABLE_ARGS), { encoding: "utf-8" });
+    return null;
   } catch (error) {
     return (error as Error).message;
   }
